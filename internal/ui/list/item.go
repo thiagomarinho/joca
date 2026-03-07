@@ -46,6 +46,9 @@ func renderBadge(k config.ProviderKind) string {
 
 func renderStatus(s provider.Status, err error) string {
 	if err != nil {
+		if provider.IsCredentialError(err) {
+			return styles.StatusFailed.Render("✗ no credentials")
+		}
 		return styles.StatusFailed.Render("✗ error")
 	}
 	switch s {

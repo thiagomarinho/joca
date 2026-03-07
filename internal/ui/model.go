@@ -157,6 +157,9 @@ func (m *RootModel) View() string {
 		sb.WriteString(m.stack[len(m.stack)-1].View())
 	}
 
+	// Credential help (only on the list screen)
+	sb.WriteString(m.credHelpView())
+
 	// Footer bar
 	sb.WriteByte('\n')
 	footer := "  ↑↓: navigate  enter: detail  o: browser  a: add  r: refresh  q: quit"
@@ -167,6 +170,53 @@ func (m *RootModel) View() string {
 	}
 	sb.WriteString(styles.Footer.Render(footer))
 
+	return sb.String()
+}
+
+// credHelpView returns provider-specific setup instructions for any pipeline
+// that has a credential error. Returns empty string when not on the list screen
+// or when there are no credential errors.
+func (m *RootModel) credHelpView() string {
+	if len(m.stack) != 1 {
+		return ""
+	}
+	listView, ok := m.stack[0].(list.Model)
+	if !ok {
+		return ""
+	}
+
+	seen := map[config.ProviderKind]bool{}
+	var lines []string
+	for _, item := range listView.Items {
+		if !provider.IsCredentialError(item.Err) || seen[item.Entry.Provider] {
+			continue
+		}
+		seen[item.Entry.Provider] = true
+		switch item.Entry.Provider {
+		case config.ProviderGitHub:
+			lines = append(lines,
+				"  GitHub Actions — option 1: export GITHUB_TOKEN=<your-token>",
+				"                  option 2: run `gh auth login`",
+			)
+		case config.ProviderAWS:
+			lines = append(lines,
+				"  AWS CodePipeline — option 1: run `aws configure`",
+				"                    option 2: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
+			)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(styles.FormError.Render("  Credential setup needed:"))
+	sb.WriteByte('\n')
+	for _, l := range lines {
+		sb.WriteString(styles.Footer.Render(l))
+		sb.WriteByte('\n')
+	}
 	return sb.String()
 }
 
