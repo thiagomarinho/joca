@@ -24,6 +24,7 @@ type Run struct {
 	ID        string
 	Branch    string
 	Status    Status
+	Stage     string // current stage name (AWS) or empty (GitHub)
 	StartedAt time.Time
 	URL       string
 	// Logs is a lazy loader for log output. May be nil if not supported.

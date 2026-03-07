@@ -19,6 +19,7 @@ import (
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
+	"github.com/thiagomarinho/joca/internal/ui/watch"
 )
 
 type tickMsg time.Time
@@ -107,9 +108,19 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			listView.Items[msg.index] = msg.item
 			m.stack[0] = listView
 		}
+		// Forward update to watch view if present in stack
+		for i, v := range m.stack {
+			if wv, ok := v.(watch.Model); ok {
+				m.stack[i] = wv.UpdateItem(msg.item)
+			}
+		}
 		return m, nil
 
 	// Messages from child views
+	case list.OpenWatchMsg:
+		m.stack = append(m.stack, watch.New(msg.Items))
+		return m, nil
+
 	case list.OpenDetailMsg:
 		m.stack = append(m.stack, detail.New(msg.Item))
 		return m, nil
@@ -169,7 +180,7 @@ func (m *RootModel) View() string {
 
 	// Footer bar
 	sb.WriteByte('\n')
-	footer := "  ↑↓: navigate  enter: detail  o: browser  a: add  r: refresh  q: quit"
+	footer := "  ↑↓: navigate  enter: detail  space: pin  w: watch  o: browser  a: add  r: refresh  q: quit"
 	if m.statusMsg != "" {
 		footer = "  " + m.statusMsg
 	} else if !m.lastRefresh.IsZero() {
@@ -366,9 +377,10 @@ func humanDur(d time.Duration) string {
 	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
-// isBackMsg detects the unexported backMsg from the detail package via type name.
+// isBackMsg detects unexported backMsg types from child views via type name.
 func isBackMsg(msg tea.Msg) bool {
-	return fmt.Sprintf("%T", msg) == "detail.backMsg"
+	t := fmt.Sprintf("%T", msg)
+	return t == "detail.backMsg" || t == "watch.backMsg"
 }
 
 // errorProvider is a no-op provider used when initialization fails.

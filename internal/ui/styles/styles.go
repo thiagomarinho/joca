@@ -23,8 +23,9 @@ var (
 	StatusUnknown  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	// List row
-	SelectedRow   = lipgloss.NewStyle().Background(lipgloss.Color("237")).Bold(true)
-	UnselectedRow = lipgloss.NewStyle()
+	SelectedRow    = lipgloss.NewStyle().Background(lipgloss.Color("237")).Bold(true)
+	UnselectedRow  = lipgloss.NewStyle()
+	MarkerSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
 	// Name column
 	PipelineName = lipgloss.NewStyle().Width(20)

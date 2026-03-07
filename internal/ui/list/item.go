@@ -20,15 +20,20 @@ type PipelineItem struct {
 }
 
 // Render returns the single-line string for this row.
-// selected controls whether the selected style is applied.
-func (p PipelineItem) Render(selected bool) string {
+// highlighted controls whether the selected-row style is applied.
+// marked controls whether the ◉ watch-pin marker is shown.
+func (p PipelineItem) Render(highlighted, marked bool) string {
+	marker := " "
+	if marked {
+		marker = styles.MarkerSelected.Render("◉")
+	}
 	name := styles.PipelineName.Render(truncate(p.Entry.Name, 20))
 	badge := renderBadge(p.Entry.Provider)
 	status := renderStatus(p.Current.Status, p.Err)
 	dots := renderDots(p.History)
 
-	line := fmt.Sprintf("%s %s  %-22s %s", name, badge, status, dots)
-	if selected {
+	line := fmt.Sprintf("%s %s %s  %-22s %s", marker, name, badge, status, dots)
+	if highlighted {
 		return styles.SelectedRow.Render(line)
 	}
 	return styles.UnselectedRow.Render(line)

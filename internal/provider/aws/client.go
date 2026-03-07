@@ -65,6 +65,7 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 	return provider.Run{
 		ID:        c.pipelineName,
 		Status:    status,
+		Stage:     currentStage(out.StageStates),
 		StartedAt: aws.ToTime(out.Updated),
 		URL:       c.URL(),
 	}, nil
@@ -99,6 +100,16 @@ func (c *Client) Trigger(ctx context.Context) error {
 		return fmt.Errorf("StartPipelineExecution: %w", err)
 	}
 	return nil
+}
+
+func currentStage(stages []types.StageState) string {
+	for _, s := range stages {
+		if s.LatestExecution != nil &&
+			s.LatestExecution.Status == types.StageExecutionStatusInProgress {
+			return aws.ToString(s.StageName)
+		}
+	}
+	return ""
 }
 
 func derivePipelineStatus(stages []types.StageState) provider.Status {

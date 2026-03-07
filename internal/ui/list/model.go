@@ -24,16 +24,20 @@ type OpenAddFormMsg struct{}
 // OpenBrowserMsg asks the OS to open a URL.
 type OpenBrowserMsg struct{ URL string }
 
+// OpenWatchMsg asks the root model to push the watch dashboard.
+type OpenWatchMsg struct{ Items []PipelineItem }
+
 // Model is the pipeline list view.
 type Model struct {
-	Items  []PipelineItem
-	cursor int
-	height int
-	width  int
+	Items    []PipelineItem
+	selected map[int]bool
+	cursor   int
+	height   int
+	width    int
 }
 
 func New(items []PipelineItem) Model {
-	return Model{Items: items}
+	return Model{Items: items, selected: make(map[int]bool)}
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -60,6 +64,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "a":
 			return m, func() tea.Msg { return OpenAddFormMsg{} }
+		case " ":
+			if len(m.Items) > 0 {
+				m.selected[m.cursor] = !m.selected[m.cursor]
+			}
+		case "w":
+			if items := m.selectedItems(); len(items) > 0 {
+				return m, func() tea.Msg { return OpenWatchMsg{Items: items} }
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -83,7 +95,7 @@ func (m Model) View() string {
 	var sb strings.Builder
 	for i, item := range m.Items {
 		sb.WriteString("  ")
-		sb.WriteString(item.Render(i == m.cursor))
+		sb.WriteString(item.Render(i == m.cursor, m.selected[i]))
 		sb.WriteByte('\n')
 	}
 	return sb.String()
@@ -95,4 +107,14 @@ func (m Model) Selected() (PipelineItem, bool) {
 		return PipelineItem{}, false
 	}
 	return m.Items[m.cursor], true
+}
+
+func (m Model) selectedItems() []PipelineItem {
+	var out []PipelineItem
+	for i, item := range m.Items {
+		if m.selected[i] {
+			out = append(out, item)
+		}
+	}
+	return out
 }
