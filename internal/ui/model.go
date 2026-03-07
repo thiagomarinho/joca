@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/thiagomarinho/joca/internal/config"
+	"github.com/thiagomarinho/joca/internal/notify"
 	"github.com/thiagomarinho/joca/internal/provider"
 	awsprovider "github.com/thiagomarinho/joca/internal/provider/aws"
 	ghprovider "github.com/thiagomarinho/joca/internal/provider/github"
@@ -38,6 +39,10 @@ type RootModel struct {
 	width           int
 	height          int
 	statusMsg       string
+	// prevStatus tracks the last known status per pipeline name so we can
+	// detect changes and fire OS notifications. A nil map entry means the
+	// pipeline has never been fetched yet (suppress notification on first load).
+	prevStatus map[string]provider.Status
 }
 
 // New builds the root model from the loaded app config.
@@ -56,6 +61,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		providers:       providers,
 		refreshInterval: interval,
 		stack:           []tea.Model{list.New(items)},
+		prevStatus:      make(map[string]provider.Status),
 	}
 	return m
 }
@@ -94,6 +100,7 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fetchResultMsg:
 		m.lastRefresh = time.Now()
 		m.statusMsg = ""
+		m.maybeNotify(msg.item)
 		// Update the list view's item
 		listView, ok := m.stack[0].(list.Model)
 		if ok && msg.index >= 0 && msg.index < len(listView.Items) {
@@ -171,6 +178,45 @@ func (m *RootModel) View() string {
 	sb.WriteString(styles.Footer.Render(footer))
 
 	return sb.String()
+}
+
+// maybeNotify fires an OS notification if the pipeline's status changed since
+// the last fetch. The first fetch for each pipeline is silently recorded
+// without notifying to avoid a burst of notifications on startup.
+func (m *RootModel) maybeNotify(item list.PipelineItem) {
+	name := item.Entry.Name
+	newStatus := item.Current.Status
+	if item.Err != nil {
+		newStatus = provider.StatusUnknown
+	}
+
+	prev, seen := m.prevStatus[name]
+	m.prevStatus[name] = newStatus
+
+	if !seen || prev == newStatus {
+		return
+	}
+
+	notify.Send("joca — "+name, statusNotifyMessage(newStatus))
+}
+
+func statusNotifyMessage(s provider.Status) string {
+	switch s {
+	case provider.StatusSuccess:
+		return "✓ Pipeline succeeded"
+	case provider.StatusFailed:
+		return "✗ Pipeline failed"
+	case provider.StatusRunning:
+		return "● Pipeline started running"
+	case provider.StatusApproval:
+		return "⏸ Pipeline is awaiting approval"
+	case provider.StatusPending:
+		return "… Pipeline is pending"
+	case provider.StatusIdle:
+		return "Pipeline is now idle"
+	default:
+		return "Pipeline status changed"
+	}
 }
 
 // credHelpView returns provider-specific setup instructions for any pipeline
