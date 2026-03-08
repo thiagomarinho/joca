@@ -40,6 +40,10 @@ var (
 	DetailValue  = lipgloss.NewStyle()
 	LogContainer = lipgloss.NewStyle().Foreground(lipgloss.Color("7")).MarginTop(1)
 
+	// Credential status
+	CredOK      = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+	CredMissing = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
+
 	// Add form
 	FormTitle  = lipgloss.NewStyle().Bold(true).MarginBottom(1)
 	FormLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Width(16)

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/thiagomarinho/joca/internal/config"
+	"github.com/thiagomarinho/joca/internal/credstatus"
 	"github.com/thiagomarinho/joca/internal/provider"
 	awslist "github.com/thiagomarinho/joca/internal/provider/aws"
 	ghlist "github.com/thiagomarinho/joca/internal/provider/github"
@@ -21,6 +22,7 @@ type step int
 
 const (
 	stepProvider step = iota
+	stepAWSCredentials
 	stepGHRepo
 	stepGHWorkflow
 	stepAWSPipeline
@@ -45,6 +47,9 @@ type workflowsLoadedMsg struct {
 type awsPipelinesMsg struct {
 	names []string
 	err   error
+}
+type awsCredCheckMsg struct {
+	status credstatus.Status
 }
 
 // Model is the guided add-pipeline wizard.
@@ -71,6 +76,12 @@ type Model struct {
 	wfLoading  bool
 	wfCursor   int
 	wfSelected map[int]bool
+
+	// aws credential inputs (stepAWSCredentials)
+	awsRegion    string
+	awsProfile   string
+	awsCredField int  // 0=region, 1=profile
+	awsChecking  bool // true while credential check is in-flight
 
 	// aws pipeline browser
 	awsPipelines []string
@@ -115,6 +126,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case awsCredCheckMsg:
+		m.awsChecking = false
+		if !msg.status.Present {
+			if m.awsProfile != "" {
+				m.err = fmt.Sprintf("no credentials found for profile %q", m.awsProfile)
+			} else {
+				m.err = "no AWS credentials found — set a profile or configure default credentials"
+			}
+			return m, nil
+		}
+		// Credentials OK — proceed to pipeline list.
+		m.step = stepAWSPipeline
+		m.awsLoading = true
+		m.err = ""
+		return m, loadAWSPipelinesCmd(m.awsRegion, m.awsProfile)
+
 	case awsPipelinesMsg:
 		m.awsLoading = false
 		if msg.err != nil {
@@ -128,6 +155,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.step {
 		case stepProvider:
 			return m.updateProvider(msg)
+		case stepAWSCredentials:
+			return m.updateAWSCredentials(msg)
 		case stepGHRepo:
 			return m.updateGHRepo(msg)
 		case stepGHWorkflow:
@@ -159,11 +188,47 @@ func (m Model) updateProvider(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			return m, loadReposCmd()
 		}
-		// AWS → load pipelines
-		m.step = stepAWSPipeline
-		m.awsLoading = true
+		// AWS → ask for region + profile first
+		m.step = stepAWSCredentials
+		m.awsCredField = 0
 		m.err = ""
-		return m, loadAWSPipelinesCmd()
+	}
+	return m, nil
+}
+
+func (m Model) updateAWSCredentials(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.awsChecking {
+		return m, nil // ignore input while check is in-flight
+	}
+	switch msg.String() {
+	case "esc":
+		m.step = stepProvider
+		m.err = ""
+	case "tab", "down":
+		m.awsCredField = 1 - m.awsCredField
+	case "up":
+		m.awsCredField = 1 - m.awsCredField
+	case "backspace":
+		if m.awsCredField == 0 && len(m.awsRegion) > 0 {
+			m.awsRegion = m.awsRegion[:len(m.awsRegion)-1]
+		} else if m.awsCredField == 1 && len(m.awsProfile) > 0 {
+			m.awsProfile = m.awsProfile[:len(m.awsProfile)-1]
+		}
+	case "enter":
+		m.awsChecking = true
+		m.err = ""
+		profile := m.awsProfile
+		return m, func() tea.Msg {
+			return awsCredCheckMsg{status: credstatus.CheckAWS(profile)}
+		}
+	default:
+		if msg.Type == tea.KeyRunes {
+			if m.awsCredField == 0 {
+				m.awsRegion += string(msg.Runes)
+			} else {
+				m.awsProfile += string(msg.Runes)
+			}
+		}
 	}
 	return m, nil
 }
@@ -242,7 +307,11 @@ func (m Model) updateAWSPipeline(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	filtered := m.filteredAWSPipelines()
 	switch msg.String() {
 	case "esc":
-		m.step = stepProvider
+		m.step = stepAWSCredentials
+		m.awsPipelines = nil
+		m.awsFilter = ""
+		m.awsCursor = 0
+		m.awsOffset = 0
 		m.err = ""
 	case "up":
 		if m.awsCursor > 0 {
@@ -315,6 +384,8 @@ func (m Model) saveAWSPipeline(name string) (tea.Model, tea.Cmd) {
 		Name:         name,
 		Provider:     config.ProviderAWS,
 		PipelineName: name,
+		AWSRegion:    m.awsRegion,
+		AWSProfile:   m.awsProfile,
 	}
 	if err := config.AddPipeline(m.configFile, entry); err != nil {
 		m.err = err.Error()
@@ -377,11 +448,11 @@ func loadWorkflowsCmd(owner, repo, token string) tea.Cmd {
 	}
 }
 
-func loadAWSPipelinesCmd() tea.Cmd {
+func loadAWSPipelinesCmd(region, profile string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		names, err := awslist.ListPipelines(ctx, "", "")
+		names, err := awslist.ListPipelines(ctx, region, profile)
 		return awsPipelinesMsg{names: names, err: err}
 	}
 }
@@ -392,6 +463,8 @@ func (m Model) View() string {
 	switch m.step {
 	case stepProvider:
 		return m.viewProvider()
+	case stepAWSCredentials:
+		return m.viewAWSCredentials()
 	case stepGHRepo:
 		return m.viewGHRepo()
 	case stepGHWorkflow:
@@ -424,6 +497,39 @@ func (m Model) viewProvider() string {
 		sb.WriteString("  " + styles.FormError.Render("✗ "+m.err) + "\n\n")
 	}
 	sb.WriteString("  " + styles.Footer.Render("↑↓: navigate  enter: select  esc: cancel"))
+	return sb.String()
+}
+
+func (m Model) viewAWSCredentials() string {
+	var sb strings.Builder
+	sb.WriteString("\n  ")
+	sb.WriteString(styles.FormTitle.Render("Add AWS pipeline  —  credentials"))
+	sb.WriteString("\n\n")
+
+	fields := []struct{ label, value string }{
+		{"Region: ", m.awsRegion},
+		{"Profile:", m.awsProfile},
+	}
+	for i, f := range fields {
+		active := i == m.awsCredField
+		label := styles.FormLabel.Render("  " + f.label + "  ")
+		var val string
+		if active {
+			val = styles.FormInput.Render(f.value) + styles.FormCursor.Render("_")
+		} else {
+			val = styles.Footer.Render(f.value)
+		}
+		sb.WriteString(label + val + "\n")
+	}
+	sb.WriteString("  " + styles.Footer.Render("  (both optional)") + "\n")
+
+	sb.WriteString("\n")
+	if m.awsChecking {
+		sb.WriteString("  " + styles.Footer.Render("Checking credentials…") + "\n\n")
+	} else if m.err != "" {
+		sb.WriteString("  " + styles.FormError.Render("✗ "+m.err) + "\n\n")
+	}
+	sb.WriteString("  " + styles.Footer.Render("tab/↑↓: switch field  enter: continue  esc: back"))
 	return sb.String()
 }
 
@@ -516,8 +622,16 @@ func (m Model) viewGHWorkflow() string {
 
 func (m Model) viewAWSPipeline() string {
 	var sb strings.Builder
+
+	title := "Add AWS pipeline  —  select a pipeline"
+	if m.awsProfile != "" {
+		title += fmt.Sprintf("  [profile: %s]", m.awsProfile)
+	}
+	if m.awsRegion != "" {
+		title += fmt.Sprintf("  [region: %s]", m.awsRegion)
+	}
 	sb.WriteString("\n  ")
-	sb.WriteString(styles.FormTitle.Render("Add AWS pipeline  —  select a pipeline"))
+	sb.WriteString(styles.FormTitle.Render(title))
 	sb.WriteString("\n\n")
 
 	sb.WriteString("  Filter: " + styles.FormInput.Render(m.awsFilter) + styles.FormCursor.Render("_") + "\n\n")
