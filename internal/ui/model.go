@@ -357,17 +357,19 @@ func (m *RootModel) credStatusView() string {
 			"                  option 2: run `gh auth login`",
 		)
 	}
-	for _, profile := range m.missingAWSProfiles() {
-		if profile == "" {
-			helpLines = append(helpLines,
-				"  AWS CodePipeline — option 1: run `aws configure` (creates a default profile)",
-				"                    option 2: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
-				"                    option 3: run `joca add aws` and set a named profile",
-			)
-		} else {
-			helpLines = append(helpLines,
-				fmt.Sprintf("  AWS profile %q — run `aws configure --profile %s`", profile, profile),
-			)
+	if !m.anyAWSPresent() {
+		for _, profile := range m.missingAWSProfiles() {
+			if profile == "" {
+				helpLines = append(helpLines,
+					"  AWS CodePipeline — option 1: run `aws configure` (creates a default profile)",
+					"                    option 2: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
+					"                    option 3: run `joca add aws` and set a named profile",
+				)
+			} else {
+				helpLines = append(helpLines,
+					fmt.Sprintf("  AWS profile %q — run `aws configure --profile %s`", profile, profile),
+				)
+			}
 		}
 	}
 	if len(helpLines) > 0 {
@@ -423,6 +425,16 @@ func (m *RootModel) awsCredPart() string {
 		}
 	}
 	return "AWS " + strings.Join(parts, "  ")
+}
+
+// anyAWSPresent reports whether at least one AWS profile has working credentials.
+func (m *RootModel) anyAWSPresent() bool {
+	for _, s := range m.awsCreds {
+		if s.Present {
+			return true
+		}
+	}
+	return false
 }
 
 // missingAWSProfiles returns the sorted list of profile keys with Present=false.
