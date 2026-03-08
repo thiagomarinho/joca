@@ -17,33 +17,36 @@ const apiBase = "https://api.github.com"
 
 // Client fetches GitHub Actions workflow runs for a given repo.
 type Client struct {
-	owner string
-	repo  string
-	token string
-	http  *http.Client
+	owner    string
+	repo     string
+	workflow string // optional: filename e.g. "ci.yml"; empty = all workflows
+	token    string
+	http     *http.Client
 }
 
 // New creates a GitHub Actions client. Auth is resolved automatically:
 // GITHUB_TOKEN env var takes precedence, then the gh CLI token.
-func New(owner, repo string) (*Client, error) {
+// workflow is optional (e.g. "ci.yml"); empty means all workflows.
+func New(owner, repo, workflow string) (*Client, error) {
 	token, err := resolveToken()
 	if err != nil {
 		return nil, fmt.Errorf("github auth: %w", err)
 	}
 	return &Client{
-		owner: owner,
-		repo:  repo,
-		token: token,
-		http:  &http.Client{Timeout: 15 * time.Second},
+		owner:    owner,
+		repo:     repo,
+		workflow: workflow,
+		token:    token,
+		http:     &http.Client{Timeout: 15 * time.Second},
 	}, nil
 }
 
 // NewWithToken creates a client with an explicit token (useful in tests).
-func NewWithToken(owner, repo, token string, httpClient *http.Client) *Client {
+func NewWithToken(owner, repo, workflow, token string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{owner: owner, repo: repo, token: token, http: httpClient}
+	return &Client{owner: owner, repo: repo, workflow: workflow, token: token, http: httpClient}
 }
 
 func resolveToken() (string, error) {
@@ -77,14 +80,17 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 }
 
 func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/runs?per_page=%d", apiBase, c.owner, c.repo, n)
+	var url string
+	if c.workflow != "" {
+		url = fmt.Sprintf("%s/repos/%s/%s/actions/workflows/%s/runs?per_page=%d", apiBase, c.owner, c.repo, c.workflow, n)
+	} else {
+		url = fmt.Sprintf("%s/repos/%s/%s/actions/runs?per_page=%d", apiBase, c.owner, c.repo, n)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	setGHHeaders(req, c.token)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -141,9 +147,7 @@ func (c *Client) Trigger(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	setGHHeaders(req, c.token)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -162,9 +166,7 @@ func (c *Client) fetchLogs(ctx context.Context, runID int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("building request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	setGHHeaders(req, c.token)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -173,6 +175,12 @@ func (c *Client) fetchLogs(ctx context.Context, runID int64) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 	// GitHub returns a redirect to a zip; for now return the URL for the user to open.
 	return fmt.Sprintf("Log download URL: %s\nOpen in browser: %s", resp.Header.Get("Location"), c.URL()), nil
+}
+
+func setGHHeaders(req *http.Request, token string) {
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 }
 
 func mapGHStatus(status, conclusion string) provider.Status {

@@ -15,7 +15,7 @@ import (
 	"github.com/thiagomarinho/joca/internal/provider"
 	awsprovider "github.com/thiagomarinho/joca/internal/provider/aws"
 	ghprovider "github.com/thiagomarinho/joca/internal/provider/github"
-	"github.com/thiagomarinho/joca/internal/ui/addform"
+	"github.com/thiagomarinho/joca/internal/ui/addwizard"
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
@@ -90,8 +90,10 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "r":
-			m.statusMsg = "Refreshing…"
-			return m, m.fetchAllCmd()
+			if len(m.stack) == 1 {
+				m.statusMsg = "Refreshing…"
+				return m, m.fetchAllCmd()
+			}
 		}
 		return m, m.forwardToActive(msg)
 
@@ -126,17 +128,21 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case list.OpenAddFormMsg:
-		m.stack = append(m.stack, addform.New(m.resolvedCfg.ConfigFile))
+		m.stack = append(m.stack, addwizard.New(m.resolvedCfg.ConfigFile))
 		return m, nil
 
 	case list.OpenBrowserMsg:
 		openBrowser(msg.URL)
 		return m, nil
 
-	case addform.SavedMsg:
+	case addwizard.SavedMsg:
 		// Reload config, rebuild list
-		m.stack = m.stack[:len(m.stack)-1] // pop form
-		m.statusMsg = fmt.Sprintf("Added %q", msg.Entry.Name)
+		m.stack = m.stack[:len(m.stack)-1] // pop wizard
+		if len(msg.Entries) == 1 {
+			m.statusMsg = fmt.Sprintf("Added %q", msg.Entries[0].Name)
+		} else {
+			m.statusMsg = fmt.Sprintf("Added %d pipelines", len(msg.Entries))
+		}
 		newCfg, err := config.Load(m.resolvedCfg.ConfigFile)
 		if err == nil {
 			m.appCfg = newCfg
@@ -145,7 +151,7 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fetchAllCmd()
 
-	case addform.CancelledMsg:
+	case addwizard.CancelledMsg:
 		if len(m.stack) > 1 {
 			m.stack = m.stack[:len(m.stack)-1]
 		}
@@ -324,7 +330,7 @@ func buildProviders(entries []config.PipelineEntry) []provider.Provider {
 	for i, e := range entries {
 		switch e.Provider {
 		case config.ProviderGitHub:
-			p, err := ghprovider.New(e.Owner, e.Repo)
+			p, err := ghprovider.New(e.Owner, e.Repo, e.Workflow)
 			if err != nil {
 				providers[i] = &errorProvider{err: err, url: fmt.Sprintf("https://github.com/%s/%s/actions", e.Owner, e.Repo)}
 			} else {

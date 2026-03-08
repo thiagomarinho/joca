@@ -43,7 +43,7 @@ func TestRecentRuns_parsesResponse(t *testing.T) {
 
 	// Swap the API base by using a custom transport that rewrites the host.
 	transport := rewriteTransport(srv.URL)
-	client := gh.NewWithToken("owner", "repo", "tok", &http.Client{Transport: transport})
+	client := gh.NewWithToken("owner", "repo", "", "tok", &http.Client{Transport: transport})
 
 	runs, err := client.RecentRuns(context.Background(), 2)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestCurrentStatus_empty_returnsIdle(t *testing.T) {
 	srv := makeServer(t, nil)
 	defer srv.Close()
 	transport := rewriteTransport(srv.URL)
-	client := gh.NewWithToken("owner", "repo", "tok", &http.Client{Transport: transport})
+	client := gh.NewWithToken("owner", "repo", "", "tok", &http.Client{Transport: transport})
 
 	run, err := client.CurrentStatus(context.Background())
 	if err != nil {

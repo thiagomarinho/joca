@@ -28,6 +28,7 @@ var (
 	addName       string
 	addAWSProfile string
 	addAWSRegion  string
+	addGHWorkflow string
 )
 
 func init() {
@@ -35,6 +36,7 @@ func init() {
 	addCmd.Flags().StringVar(&addName, "name", "", "Display name (defaults to the target argument)")
 	addCmd.Flags().StringVar(&addAWSProfile, "profile", "", "AWS profile name (AWS only)")
 	addCmd.Flags().StringVar(&addAWSRegion, "region", "", "AWS region (AWS only)")
+	addCmd.Flags().StringVar(&addGHWorkflow, "workflow", "", "Workflow filename to track, e.g. ci.yml (GitHub only)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
@@ -58,6 +60,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			Provider: config.ProviderGitHub,
 			Owner:    parts[0],
 			Repo:     parts[1],
+			Workflow: addGHWorkflow,
 		}
 
 	case "aws", "codepipeline":

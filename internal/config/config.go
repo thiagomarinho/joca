@@ -20,8 +20,9 @@ type PipelineEntry struct {
 	Provider ProviderKind `yaml:"provider"`
 
 	// GitHub-specific
-	Owner string `yaml:"owner,omitempty"`
-	Repo  string `yaml:"repo,omitempty"`
+	Owner    string `yaml:"owner,omitempty"`
+	Repo     string `yaml:"repo,omitempty"`
+	Workflow string `yaml:"workflow,omitempty"` // e.g. ci.yml; empty = all workflows
 
 	// AWS-specific
 	PipelineName string `yaml:"pipeline_name,omitempty"`
