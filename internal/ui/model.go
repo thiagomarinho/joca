@@ -17,14 +17,17 @@ import (
 	"github.com/thiagomarinho/joca/internal/provider"
 	awsprovider "github.com/thiagomarinho/joca/internal/provider/aws"
 	ghprovider "github.com/thiagomarinho/joca/internal/provider/github"
+	"github.com/thiagomarinho/joca/internal/telemetry"
 	"github.com/thiagomarinho/joca/internal/ui/addwizard"
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
+	uitelemetry "github.com/thiagomarinho/joca/internal/ui/telemetry"
 )
 
 type tickMsg time.Time
 type uiTickMsg time.Time
+type clearStatusMsg struct{}
 
 type fetchResultMsg struct {
 	index int
@@ -47,6 +50,7 @@ type RootModel struct {
 	// pipeline has never been fetched yet (suppress notification on first load).
 	prevStatus map[string]provider.Status
 	paused     map[int]bool // pipelines with auto-refresh disabled
+	recorder   *telemetry.Recorder
 	// Credential status, always checked on startup regardless of configured pipelines.
 	ghCred   credstatus.Status
 	awsCreds map[string]credstatus.Status // key: aws_profile (or "" for default chain)
@@ -70,6 +74,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		stack:           []tea.Model{list.New(items)},
 		prevStatus:      make(map[string]provider.Status),
 		paused:          make(map[int]bool),
+		recorder:        telemetry.NewRecorder(),
 	}
 
 	// Check credentials for all providers, regardless of what is configured.
@@ -116,8 +121,27 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Refreshing…"
 				return m, m.fetchAllCmd()
 			}
+		case "t":
+			if len(m.stack) == 1 {
+				m.recorder.SetEnabled(!m.recorder.IsEnabled())
+				if m.recorder.IsEnabled() {
+					m.statusMsg = "Tracking on"
+				} else {
+					m.statusMsg = "Tracking off"
+				}
+				return m, m.clearStatusAfter(2 * time.Second)
+			}
+		case "T":
+			if len(m.stack) == 1 && m.recorder.IsEnabled() {
+				m.stack = append(m.stack, uitelemetry.New(m.recorder))
+				return m, nil
+			}
 		}
 		return m, m.forwardToActive(msg)
+
+	case clearStatusMsg:
+		m.statusMsg = ""
+		return m, nil
 
 	case uiTickMsg:
 		return m, m.uiTickCmd()
@@ -143,6 +167,14 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			listView.Items[msg.Index].Paused = m.paused[msg.Index]
 			m.stack[0] = listView
 		}
+		return m, nil
+
+	case uitelemetry.ClearMsg:
+		m.recorder.Clear()
+		return m, nil
+
+	case uitelemetry.ToggleMsg:
+		m.recorder.SetEnabled(!m.recorder.IsEnabled())
 		return m, nil
 
 	// Messages from child views
@@ -209,7 +241,13 @@ func (m *RootModel) View() string {
 
 	// Footer bar
 	sb.WriteByte('\n')
-	footer := "  ↑↓: navigate  enter: detail  space: pause/resume  o: browser  a: add  r: refresh  q: quit"
+	footer := "  ↑↓: navigate  enter: detail  space: pause/resume  o: browser  a: add  r: refresh"
+	if m.recorder.IsEnabled() {
+		footer += "  t: tracking ✓  T: telemetry"
+	} else {
+		footer += "  t: tracking"
+	}
+	footer += "  q: quit"
 	if m.statusMsg != "" {
 		footer = "  " + m.statusMsg
 	} else if !m.lastRefresh.IsZero() {
@@ -393,6 +431,10 @@ func (m *RootModel) forwardToActive(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+func (m *RootModel) clearStatusAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return clearStatusMsg{} })
+}
+
 func (m *RootModel) tickCmd() tea.Cmd {
 	return tea.Tick(m.refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -413,16 +455,29 @@ func (m *RootModel) fetchAllCmd() tea.Cmd {
 			continue
 		}
 		entry := m.appCfg.Pipelines[i]
+		rec := m.recorder
 		cmds[i] = func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
+			t0 := time.Now()
 			current, err := p.CurrentStatus(ctx)
-			history, _ := p.RecentRuns(ctx, 6)
+			rec.Record(telemetry.CallRecord{
+				Pipeline: entry.Name, Provider: string(entry.Provider),
+				Method: "CurrentStatus", At: t0, Duration: time.Since(t0), Err: err,
+			})
+
+			t1 := time.Now()
+			history, hErr := p.RecentRuns(ctx, 6)
+			rec.Record(telemetry.CallRecord{
+				Pipeline: entry.Name, Provider: string(entry.Provider),
+				Method: "RecentRuns", At: t1, Duration: time.Since(t1), Err: hErr,
+			})
 
 			// RecentRuns only has execution-level status, so it can't detect
 			// approval (which requires stage/action detail). Find the matching
 			// history entry by execution ID and promote its dot to approval.
+			_ = hErr
 			if err == nil && current.Status == provider.StatusApproval && current.ID != "" {
 				for j := range history {
 					if history[j].ID == current.ID {
@@ -504,9 +559,9 @@ func humanDur(d time.Duration) string {
 	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
-// isBackMsg detects unexported backMsg types from child views via type name.
+// isBackMsg detects unexported backMsg types from child views via type name suffix.
 func isBackMsg(msg tea.Msg) bool {
-	return fmt.Sprintf("%T", msg) == "detail.backMsg"
+	return strings.HasSuffix(fmt.Sprintf("%T", msg), ".backMsg")
 }
 
 // errorProvider is a no-op provider used when initialization fails.
