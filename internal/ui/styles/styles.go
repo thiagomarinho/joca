@@ -26,6 +26,7 @@ var (
 	// List row
 	SelectedRow    = lipgloss.NewStyle().Background(lipgloss.Color("237")).Bold(true)
 	UnselectedRow  = lipgloss.NewStyle()
+	PausedRow      = lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // dark grey
 	MarkerSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
 	// Name column

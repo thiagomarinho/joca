@@ -21,7 +21,6 @@ import (
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
-	"github.com/thiagomarinho/joca/internal/ui/watch"
 )
 
 type tickMsg time.Time
@@ -47,6 +46,7 @@ type RootModel struct {
 	// detect changes and fire OS notifications. A nil map entry means the
 	// pipeline has never been fetched yet (suppress notification on first load).
 	prevStatus map[string]provider.Status
+	paused     map[int]bool // pipelines with auto-refresh disabled
 	// Credential status, always checked on startup regardless of configured pipelines.
 	ghCred   credstatus.Status
 	awsCreds map[string]credstatus.Status // key: aws_profile (or "" for default chain)
@@ -69,6 +69,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		refreshInterval: interval,
 		stack:           []tea.Model{list.New(items)},
 		prevStatus:      make(map[string]provider.Status),
+		paused:          make(map[int]bool),
 	}
 
 	// Check credentials for all providers, regardless of what is configured.
@@ -134,19 +135,17 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			listView.Items[msg.index] = msg.item
 			m.stack[0] = listView
 		}
-		// Forward update to watch view if present in stack
-		for i, v := range m.stack {
-			if wv, ok := v.(watch.Model); ok {
-				m.stack[i] = wv.UpdateItem(msg.item)
-			}
+		return m, nil
+
+	case list.TogglePauseMsg:
+		m.paused[msg.Index] = !m.paused[msg.Index]
+		if listView, ok := m.stack[0].(list.Model); ok {
+			listView.Items[msg.Index].Paused = m.paused[msg.Index]
+			m.stack[0] = listView
 		}
 		return m, nil
 
 	// Messages from child views
-	case list.OpenWatchMsg:
-		m.stack = append(m.stack, watch.New(msg.Items))
-		return m, nil
-
 	case list.OpenDetailMsg:
 		m.stack = append(m.stack, detail.New(msg.Item))
 		return m, nil
@@ -210,7 +209,7 @@ func (m *RootModel) View() string {
 
 	// Footer bar
 	sb.WriteByte('\n')
-	footer := "  ↑↓: navigate  enter: detail  space: pin  w: watch  o: browser  a: add  r: refresh  q: quit"
+	footer := "  ↑↓: navigate  enter: detail  space: pause/resume  o: browser  a: add  r: refresh  q: quit"
 	if m.statusMsg != "" {
 		footer = "  " + m.statusMsg
 	} else if !m.lastRefresh.IsZero() {
@@ -410,6 +409,9 @@ func (m *RootModel) fetchAllCmd() tea.Cmd {
 	cmds := make([]tea.Cmd, len(m.providers))
 	for i, p := range m.providers {
 		i, p := i, p
+		if m.paused[i] {
+			continue
+		}
 		entry := m.appCfg.Pipelines[i]
 		cmds[i] = func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -504,8 +506,7 @@ func humanDur(d time.Duration) string {
 
 // isBackMsg detects unexported backMsg types from child views via type name.
 func isBackMsg(msg tea.Msg) bool {
-	t := fmt.Sprintf("%T", msg)
-	return t == "detail.backMsg" || t == "watch.backMsg"
+	return fmt.Sprintf("%T", msg) == "detail.backMsg"
 }
 
 // errorProvider is a no-op provider used when initialization fails.

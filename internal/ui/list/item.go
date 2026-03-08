@@ -19,15 +19,15 @@ type PipelineItem struct {
 	Current provider.Run
 	History []provider.Run // most recent first, up to historyDots
 	Err     error          // set if last fetch failed
+	Paused  bool           // true when the user has disabled auto-refresh
 }
 
 // Render returns the single-line string for this row.
 // highlighted controls whether the selected-row style is applied.
-// marked controls whether the ◉ watch-pin marker is shown.
-func (p PipelineItem) Render(highlighted, marked bool) string {
+func (p PipelineItem) Render(highlighted bool) string {
 	marker := " "
-	if marked {
-		marker = styles.MarkerSelected.Render("◉")
+	if p.Paused {
+		marker = styles.DotOther.Render("⏸")
 	}
 	name := styles.PipelineName.Render(truncate(p.Entry.Name, 20))
 	badge := renderBadge(p.Entry.Provider)
@@ -42,10 +42,16 @@ func (p PipelineItem) Render(highlighted, marked bool) string {
 	}
 
 	line := fmt.Sprintf("%s %s %s  %s %s", marker, name, badge, status, dots)
-	if highlighted {
+	switch {
+	case highlighted && p.Paused:
+		return styles.SelectedRow.Render(styles.PausedRow.Render(line))
+	case highlighted:
 		return styles.SelectedRow.Render(line)
+	case p.Paused:
+		return styles.PausedRow.Render(line)
+	default:
+		return styles.UnselectedRow.Render(line)
 	}
-	return styles.UnselectedRow.Render(line)
 }
 
 func renderBadge(k config.ProviderKind) string {
