@@ -14,6 +14,7 @@ import (
 // Status holds whether credentials are present and their source description.
 type Status struct {
 	Present bool
+	Pending bool   // true while async check is in progress
 	Source  string // e.g. "GITHUB_TOKEN", "gh session", `profile "prod"`, "env vars", "~/.aws/credentials"
 }
 

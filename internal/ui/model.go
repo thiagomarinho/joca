@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,6 +29,11 @@ import (
 type tickMsg time.Time
 type uiTickMsg time.Time
 type clearStatusMsg struct{}
+
+type credCheckDoneMsg struct {
+	gh  credstatus.Status
+	aws map[string]credstatus.Status
+}
 
 type fetchResultMsg struct {
 	index int
@@ -66,6 +72,16 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 	providers := buildProviders(appCfg.Pipelines)
 	items := makeItems(appCfg.Pipelines)
 
+	// Pre-populate awsCreds keys with pending sentinels so the view has the
+	// right set of profiles before the async check completes.
+	awsCreds := make(map[string]credstatus.Status)
+	awsCreds[""] = credstatus.Status{Pending: true}
+	for _, e := range appCfg.Pipelines {
+		if e.Provider == config.ProviderAWS {
+			awsCreds[e.AWSProfile] = credstatus.Status{Pending: true}
+		}
+	}
+
 	m := &RootModel{
 		appCfg:          appCfg,
 		resolvedCfg:     resolvedCfg,
@@ -75,19 +91,8 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		prevStatus:      make(map[string]provider.Status),
 		paused:          make(map[int]bool),
 		recorder:        telemetry.NewRecorder(),
-	}
-
-	// Check credentials for all providers, regardless of what is configured.
-	m.ghCred = credstatus.CheckGitHub()
-	m.awsCreds = make(map[string]credstatus.Status)
-	awsProfiles := map[string]bool{"": true} // always check default chain
-	for _, e := range appCfg.Pipelines {
-		if e.Provider == config.ProviderAWS {
-			awsProfiles[e.AWSProfile] = true
-		}
-	}
-	for profile := range awsProfiles {
-		m.awsCreds[profile] = credstatus.CheckAWS(profile)
+		ghCred:          credstatus.Status{Pending: true},
+		awsCreds:        awsCreds,
 	}
 
 	return m
@@ -98,6 +103,7 @@ func (m *RootModel) Init() tea.Cmd {
 		m.tickCmd(),
 		m.uiTickCmd(),
 		m.fetchAllCmd(),
+		m.checkCredsCmd(),
 	)
 }
 
@@ -138,6 +144,11 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.forwardToActive(msg)
+
+	case credCheckDoneMsg:
+		m.ghCred = msg.gh
+		m.awsCreds = msg.aws
+		return m, nil
 
 	case clearStatusMsg:
 		m.statusMsg = ""
@@ -340,7 +351,7 @@ func (m *RootModel) credStatusView() string {
 
 	// Append setup help for any missing provider.
 	var helpLines []string
-	if !m.ghCred.Present {
+	if !m.ghCred.Pending && !m.ghCred.Present {
 		helpLines = append(helpLines,
 			"  GitHub Actions — option 1: export GITHUB_TOKEN=<your-token>",
 			"                  option 2: run `gh auth login`",
@@ -372,6 +383,9 @@ func (m *RootModel) credStatusView() string {
 
 // credLabel formats a single provider credential entry for the status bar.
 func credLabel(name string, s credstatus.Status) string {
+	if s.Pending {
+		return styles.Footer.Render(name + " …")
+	}
 	if s.Present {
 		return styles.CredOK.Render(name + " ✓ " + s.Source)
 	}
@@ -399,9 +413,12 @@ func (m *RootModel) awsCredPart() string {
 		if label == "" {
 			label = "(default)"
 		}
-		if s.Present {
+		switch {
+		case s.Pending:
+			parts = append(parts, styles.Footer.Render(label+" …"))
+		case s.Present:
 			parts = append(parts, styles.CredOK.Render(label+" ✓"))
-		} else {
+		default:
 			parts = append(parts, styles.CredMissing.Render(label+" ✗"))
 		}
 	}
@@ -412,7 +429,7 @@ func (m *RootModel) awsCredPart() string {
 func (m *RootModel) missingAWSProfiles() []string {
 	var missing []string
 	for profile, s := range m.awsCreds {
-		if !s.Present {
+		if !s.Pending && !s.Present {
 			missing = append(missing, profile)
 		}
 	}
@@ -501,28 +518,72 @@ func (m *RootModel) fetchAllCmd() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// checkCredsCmd runs all credential checks concurrently and returns a single
+// credCheckDoneMsg when all are complete.
+func (m *RootModel) checkCredsCmd() tea.Cmd {
+	// Snapshot the set of AWS profiles we need to check.
+	profiles := make([]string, 0, len(m.awsCreds))
+	for p := range m.awsCreds {
+		profiles = append(profiles, p)
+	}
+	return func() tea.Msg {
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		awsResults := make(map[string]credstatus.Status, len(profiles))
+
+		wg.Add(1)
+		var ghResult credstatus.Status
+		go func() {
+			defer wg.Done()
+			ghResult = credstatus.CheckGitHub()
+		}()
+
+		for _, p := range profiles {
+			p := p
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s := credstatus.CheckAWS(p)
+				mu.Lock()
+				awsResults[p] = s
+				mu.Unlock()
+			}()
+		}
+
+		wg.Wait()
+		return credCheckDoneMsg{gh: ghResult, aws: awsResults}
+	}
+}
+
 func buildProviders(entries []config.PipelineEntry) []provider.Provider {
 	providers := make([]provider.Provider, len(entries))
+	var wg sync.WaitGroup
 	for i, e := range entries {
-		switch e.Provider {
-		case config.ProviderGitHub:
-			p, err := ghprovider.New(e.Owner, e.Repo, e.Workflow)
-			if err != nil {
-				providers[i] = &errorProvider{err: err, url: fmt.Sprintf("https://github.com/%s/%s/actions", e.Owner, e.Repo)}
-			} else {
-				providers[i] = p
+		i, e := i, e
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch e.Provider {
+			case config.ProviderGitHub:
+				p, err := ghprovider.New(e.Owner, e.Repo, e.Workflow)
+				if err != nil {
+					providers[i] = &errorProvider{err: err, url: fmt.Sprintf("https://github.com/%s/%s/actions", e.Owner, e.Repo)}
+				} else {
+					providers[i] = p
+				}
+			case config.ProviderAWS:
+				p, err := awsprovider.New(context.Background(), e.PipelineName, e.AWSRegion, e.AWSProfile)
+				if err != nil {
+					providers[i] = &errorProvider{err: err}
+				} else {
+					providers[i] = p
+				}
+			default:
+				providers[i] = &errorProvider{err: fmt.Errorf("unknown provider %q", e.Provider)}
 			}
-		case config.ProviderAWS:
-			p, err := awsprovider.New(context.Background(), e.PipelineName, e.AWSRegion, e.AWSProfile)
-			if err != nil {
-				providers[i] = &errorProvider{err: err}
-			} else {
-				providers[i] = p
-			}
-		default:
-			providers[i] = &errorProvider{err: fmt.Errorf("unknown provider %q", e.Provider)}
-		}
+		}()
 	}
+	wg.Wait()
 	return providers
 }
 
