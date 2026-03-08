@@ -143,6 +143,8 @@ func renderRunDot(s provider.Status) string {
 		return styles.DotFailed.Render(styles.DotFull)
 	case provider.StatusRunning:
 		return styles.DotRunning.Render(styles.DotFull)
+	case provider.StatusApproval:
+		return styles.DotApproval.Render(styles.DotFull)
 	}
 	return styles.DotOther.Render(styles.DotEmpty)
 }
