@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
@@ -32,7 +34,14 @@ func (p PipelineItem) Render(highlighted, marked bool) string {
 	status := renderStatus(p.Current.Status, p.Err)
 	dots := renderDots(p.History)
 
-	line := fmt.Sprintf("%s %s %s  %-22s %s", marker, name, badge, status, dots)
+	// Pad status to a fixed visible width so the dots column stays aligned
+	// regardless of ANSI escape codes in the status string.
+	const statusWidth = 22
+	if pad := statusWidth - lipgloss.Width(status); pad > 0 {
+		status += strings.Repeat(" ", pad)
+	}
+
+	line := fmt.Sprintf("%s %s %s  %s %s", marker, name, badge, status, dots)
 	if highlighted {
 		return styles.SelectedRow.Render(line)
 	}
@@ -40,13 +49,22 @@ func (p PipelineItem) Render(highlighted, marked bool) string {
 }
 
 func renderBadge(k config.ProviderKind) string {
+	// All badges must render to the same visible width so columns stay aligned.
+	// " AWS " (Padding 0,1) = 5 visible chars; " GH " = 4, so pad GH by 1.
+	const badgeWidth = 5
+	var rendered string
 	switch k {
 	case config.ProviderGitHub:
-		return styles.BadgeGH.Render("GH")
+		rendered = styles.BadgeGH.Render("GH")
 	case config.ProviderAWS:
-		return styles.BadgeAWS.Render("AWS")
+		rendered = styles.BadgeAWS.Render("AWS")
+	default:
+		return strings.Repeat(" ", badgeWidth)
 	}
-	return "   "
+	if pad := badgeWidth - lipgloss.Width(rendered); pad > 0 {
+		rendered += strings.Repeat(" ", pad)
+	}
+	return rendered
 }
 
 func renderStatus(s provider.Status, err error) string {
