@@ -188,7 +188,7 @@ func mapGHStatus(status, conclusion string) provider.Status {
 	case "in_progress", "queued":
 		return provider.StatusRunning
 	case "waiting":
-		return provider.StatusPending
+		return provider.StatusApproval
 	case "completed":
 		switch conclusion {
 		case "success":
