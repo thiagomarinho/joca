@@ -25,6 +25,7 @@ import (
 )
 
 type tickMsg time.Time
+type uiTickMsg time.Time
 
 type fetchResultMsg struct {
 	index int
@@ -89,6 +90,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 func (m *RootModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.tickCmd(),
+		m.uiTickCmd(),
 		m.fetchAllCmd(),
 	)
 }
@@ -115,6 +117,9 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.forwardToActive(msg)
+
+	case uiTickMsg:
+		return m, m.uiTickCmd()
 
 	case tickMsg:
 		return m, tea.Batch(m.tickCmd(), m.fetchAllCmd())
@@ -209,7 +214,11 @@ func (m *RootModel) View() string {
 	if m.statusMsg != "" {
 		footer = "  " + m.statusMsg
 	} else if !m.lastRefresh.IsZero() {
-		footer += fmt.Sprintf("   last updated %s ago", humanDur(time.Since(m.lastRefresh)))
+		nextIn := time.Until(m.lastRefresh.Add(m.refreshInterval)).Round(time.Second)
+		if nextIn < 0 {
+			nextIn = 0
+		}
+		footer += fmt.Sprintf("   refresh in %s", humanDur(nextIn))
 	}
 	sb.WriteString(styles.Footer.Render(footer))
 
@@ -388,6 +397,12 @@ func (m *RootModel) forwardToActive(msg tea.Msg) tea.Cmd {
 func (m *RootModel) tickCmd() tea.Cmd {
 	return tea.Tick(m.refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
+	})
+}
+
+func (m *RootModel) uiTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return uiTickMsg(t)
 	})
 }
 
