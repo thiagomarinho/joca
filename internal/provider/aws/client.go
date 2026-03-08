@@ -53,6 +53,14 @@ func (c *Client) URL() string {
 	return fmt.Sprintf("https://%s.console.aws.amazon.com/codesuite/codepipeline/pipelines/%s/view", r, c.pipelineName)
 }
 
+func (c *Client) executionURL(executionID string) string {
+	r := c.region
+	if r == "" {
+		r = "us-east-1"
+	}
+	return fmt.Sprintf("https://%s.console.aws.amazon.com/codesuite/codepipeline/pipelines/%s/executions/%s/visualization", r, c.pipelineName, executionID)
+}
+
 func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 	out, err := c.cp.GetPipelineState(ctx, &codepipeline.GetPipelineStateInput{
 		Name: aws.String(c.pipelineName),
@@ -62,12 +70,16 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 	}
 
 	status, execID := derivePipelineStatus(out.StageStates)
+	url := c.URL()
+	if execID != "" {
+		url = c.executionURL(execID)
+	}
 	return provider.Run{
 		ID:        execID,
 		Status:    status,
 		Stage:     currentStage(out.StageStates),
 		StartedAt: aws.ToTime(out.Updated),
-		URL:       c.URL(),
+		URL:       url,
 	}, nil
 }
 
@@ -82,11 +94,12 @@ func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) 
 
 	runs := make([]provider.Run, 0, len(out.PipelineExecutionSummaries))
 	for _, s := range out.PipelineExecutionSummaries {
+		execID := aws.ToString(s.PipelineExecutionId)
 		runs = append(runs, provider.Run{
-			ID:        aws.ToString(s.PipelineExecutionId),
+			ID:        execID,
 			Status:    mapAWSStatus(s.Status),
 			StartedAt: aws.ToTime(s.StartTime),
-			URL:       c.URL(),
+			URL:       c.executionURL(execID),
 		})
 	}
 	return runs, nil

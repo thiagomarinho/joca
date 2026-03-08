@@ -65,6 +65,9 @@ func resolveToken() (string, error) {
 }
 
 func (c *Client) URL() string {
+	if c.workflow != "" {
+		return fmt.Sprintf("https://github.com/%s/%s/actions/workflows/%s", c.owner, c.repo, c.workflow)
+	}
 	return fmt.Sprintf("https://github.com/%s/%s/actions", c.owner, c.repo)
 }
 

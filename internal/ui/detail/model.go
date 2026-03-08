@@ -18,6 +18,7 @@ type logLoadedMsg struct{ content string }
 // Model shows the detail view for a selected pipeline.
 type Model struct {
 	item      list.PipelineItem
+	cursor    int // -1 = no run selected (opens pipeline page); 0..n = history index
 	logOffset int
 	logs      string
 	loading   bool
@@ -25,7 +26,7 @@ type Model struct {
 }
 
 func New(item list.PipelineItem) Model {
-	return Model{item: item}
+	return Model{item: item, cursor: -1}
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -37,9 +38,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "q":
 			return m, func() tea.Msg { return backMsg{} }
 		case "o":
-			url := m.item.Current.URL
-			if url == "" && len(m.item.History) > 0 {
-				url = m.item.History[0].URL
+			var url string
+			if m.cursor >= 0 && m.cursor < len(m.item.History) {
+				url = m.item.History[m.cursor].URL
+			} else {
+				url = m.item.URL
 			}
 			return m, func() tea.Msg { return list.OpenBrowserMsg{URL: url} }
 		case "l":
@@ -55,11 +58,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "up", "k":
-			if m.logOffset > 0 {
-				m.logOffset--
+			if m.logs != "" {
+				if m.logOffset > 0 {
+					m.logOffset--
+				}
+			} else if m.cursor > -1 {
+				m.cursor--
 			}
 		case "down", "j":
-			m.logOffset++
+			if m.logs != "" {
+				m.logOffset++
+			} else if m.cursor < len(m.item.History)-1 {
+				m.cursor++
+			}
 		}
 
 	case logLoadedMsg:
@@ -113,8 +124,14 @@ func (m Model) View() string {
 			if !r.StartedAt.IsZero() {
 				age = "  " + humanAge(r.StartedAt)
 			}
-			fmt.Fprintf(&sb, "  %s  #%s  %-8s  %s%s\n",
+			line := fmt.Sprintf("  %s  #%s  %-8s  %s%s",
 				dot, r.ID, r.Branch, string(r.Status), age)
+			if i == m.cursor {
+				sb.WriteString(styles.SelectedRow.Render(line))
+			} else {
+				sb.WriteString(line)
+			}
+			sb.WriteByte('\n')
 		}
 	}
 
@@ -131,7 +148,7 @@ func (m Model) View() string {
 	}
 
 	sb.WriteString("\n  ")
-	sb.WriteString(styles.Footer.Render("esc: back  o: open in browser"))
+	sb.WriteString(styles.Footer.Render("↑↓: select run  o: open in browser  esc: back"))
 	return sb.String()
 }
 

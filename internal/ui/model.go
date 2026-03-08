@@ -520,6 +520,7 @@ func (m *RootModel) fetchAllCmd() tea.Cmd {
 				index: i,
 				item: list.PipelineItem{
 					Entry:   entry,
+					URL:     p.URL(),
 					Current: current,
 					History: history,
 					Err:     err,

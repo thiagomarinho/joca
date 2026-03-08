@@ -16,6 +16,7 @@ const historyDots = 6
 // PipelineItem holds the runtime state of a single pipeline row.
 type PipelineItem struct {
 	Entry   config.PipelineEntry
+	URL     string // pipeline-level page (e.g. /actions or AWS console)
 	Current provider.Run
 	History []provider.Run // most recent first, up to historyDots
 	Err     error          // set if last fetch failed
