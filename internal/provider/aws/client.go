@@ -115,6 +115,25 @@ func currentStage(stages []types.StageState) string {
 // derivePipelineStatus returns the overall pipeline status and the execution ID
 // of the execution being reported (used to correlate with RecentRuns history).
 func derivePipelineStatus(stages []types.StageState) (provider.Status, string) {
+	// First pass: scan all stages for a pending manual approval. Approval is
+	// more actionable than "running" and must not be masked by an earlier stage
+	// that belongs to a concurrent newer execution.
+	// The Token field is only present on manual approval actions that are
+	// actively waiting — it is the approval/rejection token.
+	for _, s := range stages {
+		if s.LatestExecution == nil || s.LatestExecution.Status != types.StageExecutionStatusInProgress {
+			continue
+		}
+		for _, action := range s.ActionStates {
+			if action.LatestExecution != nil &&
+				action.LatestExecution.Status == types.ActionExecutionStatusInProgress &&
+				action.LatestExecution.Token != nil {
+				return provider.StatusApproval, aws.ToString(s.LatestExecution.PipelineExecutionId)
+			}
+		}
+	}
+
+	// Second pass: return the first non-approval active stage status.
 	for _, s := range stages {
 		if s.LatestExecution == nil {
 			continue
@@ -122,15 +141,6 @@ func derivePipelineStatus(stages []types.StageState) (provider.Status, string) {
 		execID := aws.ToString(s.LatestExecution.PipelineExecutionId)
 		switch s.LatestExecution.Status {
 		case types.StageExecutionStatusInProgress:
-			// A stage is InProgress when running normally, but also when it is
-			// blocked on a manual approval action. Check for that first.
-			for _, action := range s.ActionStates {
-				if action.LatestExecution != nil &&
-					action.LatestExecution.Status == types.ActionExecutionStatusInProgress &&
-					action.CurrentRevision == nil {
-					return provider.StatusApproval, execID
-				}
-			}
 			return provider.StatusRunning, execID
 		case types.StageExecutionStatusFailed:
 			return provider.StatusFailed, execID
@@ -138,7 +148,8 @@ func derivePipelineStatus(stages []types.StageState) (provider.Status, string) {
 			return provider.StatusUnknown, execID
 		}
 	}
-	// All stages succeeded or none in progress
+
+	// All stages succeeded or pipeline has no executions yet.
 	if len(stages) > 0 {
 		return provider.StatusSuccess, ""
 	}

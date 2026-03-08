@@ -233,26 +233,42 @@ func (m *RootModel) maybeNotify(item list.PipelineItem) {
 		return
 	}
 
-	notify.Send("joca — "+name, statusNotifyMessage(newStatus))
+	notify.Send("joca — "+name, statusNotifyMessage(newStatus, item.Current), item.Current.URL)
 }
 
-func statusNotifyMessage(s provider.Status) string {
+func statusNotifyMessage(s provider.Status, run provider.Run) string {
+	var base string
 	switch s {
 	case provider.StatusSuccess:
-		return "✓ Pipeline succeeded"
+		base = "succeeded"
 	case provider.StatusFailed:
-		return "✗ Pipeline failed"
+		base = "failed"
 	case provider.StatusRunning:
-		return "● Pipeline started running"
+		base = "started running"
 	case provider.StatusApproval:
-		return "⏸ Pipeline is awaiting approval"
+		base = "awaiting approval"
 	case provider.StatusPending:
-		return "… Pipeline is pending"
+		base = "pending"
 	case provider.StatusIdle:
-		return "Pipeline is now idle"
+		base = "idle"
 	default:
-		return "Pipeline status changed"
+		base = "status changed"
 	}
+
+	var details []string
+	if run.ID != "" {
+		details = append(details, "#"+run.ID)
+	}
+	if run.Branch != "" {
+		details = append(details, run.Branch)
+	}
+	if run.Stage != "" {
+		details = append(details, run.Stage)
+	}
+	if len(details) == 0 {
+		return base
+	}
+	return base + "  " + strings.Join(details, "  ")
 }
 
 // credStatusView renders a compact credential status bar on the list screen.
