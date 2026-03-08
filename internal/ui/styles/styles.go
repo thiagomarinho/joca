@@ -4,10 +4,11 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Status dot colors
-	DotSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
-	DotFailed  = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
-	DotRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
-	DotOther   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
+	DotSuccess  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+	DotFailed   = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
+	DotRunning  = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+	DotApproval = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple
+	DotOther    = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
 
 	// Provider badges
 	BadgeGH  = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237")).Padding(0, 1)

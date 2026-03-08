@@ -108,6 +108,8 @@ func renderDots(history []provider.Run) string {
 			sb.WriteString(styles.DotFailed.Render(styles.DotFull))
 		case provider.StatusRunning:
 			sb.WriteString(styles.DotRunning.Render(styles.DotFull))
+		case provider.StatusApproval:
+			sb.WriteString(styles.DotApproval.Render(styles.DotFull))
 		default:
 			sb.WriteString(styles.DotOther.Render(styles.DotEmpty))
 		}

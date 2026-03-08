@@ -386,6 +386,19 @@ func (m *RootModel) fetchAllCmd() tea.Cmd {
 
 			current, err := p.CurrentStatus(ctx)
 			history, _ := p.RecentRuns(ctx, 6)
+
+			// RecentRuns only has execution-level status, so it can't detect
+			// approval (which requires stage/action detail). Find the matching
+			// history entry by execution ID and promote its dot to approval.
+			if err == nil && current.Status == provider.StatusApproval && current.ID != "" {
+				for j := range history {
+					if history[j].ID == current.ID {
+						history[j].Status = provider.StatusApproval
+						break
+					}
+				}
+			}
+
 			return fetchResultMsg{
 				index: i,
 				item: list.PipelineItem{

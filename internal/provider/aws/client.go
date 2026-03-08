@@ -61,9 +61,9 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 		return provider.Run{}, fmt.Errorf("GetPipelineState: %w", err)
 	}
 
-	status := derivePipelineStatus(out.StageStates)
+	status, execID := derivePipelineStatus(out.StageStates)
 	return provider.Run{
-		ID:        c.pipelineName,
+		ID:        execID,
 		Status:    status,
 		Stage:     currentStage(out.StageStates),
 		StartedAt: aws.ToTime(out.Updated),
@@ -112,33 +112,37 @@ func currentStage(stages []types.StageState) string {
 	return ""
 }
 
-func derivePipelineStatus(stages []types.StageState) provider.Status {
+// derivePipelineStatus returns the overall pipeline status and the execution ID
+// of the execution being reported (used to correlate with RecentRuns history).
+func derivePipelineStatus(stages []types.StageState) (provider.Status, string) {
 	for _, s := range stages {
 		if s.LatestExecution == nil {
 			continue
 		}
+		execID := aws.ToString(s.LatestExecution.PipelineExecutionId)
 		switch s.LatestExecution.Status {
 		case types.StageExecutionStatusInProgress:
-			return provider.StatusRunning
-		case types.StageExecutionStatusFailed:
-			return provider.StatusFailed
-		case types.StageExecutionStatusStopped, types.StageExecutionStatusStopping:
-			return provider.StatusUnknown
-		}
-		// Check for manual approval actions
-		for _, action := range s.ActionStates {
-			if action.LatestExecution != nil &&
-				action.LatestExecution.Status == types.ActionExecutionStatusInProgress &&
-				action.CurrentRevision == nil {
-				return provider.StatusApproval
+			// A stage is InProgress when running normally, but also when it is
+			// blocked on a manual approval action. Check for that first.
+			for _, action := range s.ActionStates {
+				if action.LatestExecution != nil &&
+					action.LatestExecution.Status == types.ActionExecutionStatusInProgress &&
+					action.CurrentRevision == nil {
+					return provider.StatusApproval, execID
+				}
 			}
+			return provider.StatusRunning, execID
+		case types.StageExecutionStatusFailed:
+			return provider.StatusFailed, execID
+		case types.StageExecutionStatusStopped, types.StageExecutionStatusStopping:
+			return provider.StatusUnknown, execID
 		}
 	}
 	// All stages succeeded or none in progress
 	if len(stages) > 0 {
-		return provider.StatusSuccess
+		return provider.StatusSuccess, ""
 	}
-	return provider.StatusIdle
+	return provider.StatusIdle, ""
 }
 
 func mapAWSStatus(s types.PipelineExecutionStatus) provider.Status {
