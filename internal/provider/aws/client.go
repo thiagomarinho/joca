@@ -115,6 +115,9 @@ func (c *Client) Trigger(ctx context.Context) error {
 	return nil
 }
 
+// TriggerNew starts a new execution — identical to Trigger for AWS CodePipeline.
+func (c *Client) TriggerNew(ctx context.Context) error { return c.Trigger(ctx) }
+
 func currentStage(stages []types.StageState) string {
 	for _, s := range stages {
 		if s.LatestExecution != nil &&

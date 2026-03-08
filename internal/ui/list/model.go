@@ -27,6 +27,12 @@ type OpenBrowserMsg struct{ URL string }
 // TogglePauseMsg asks the root model to pause/resume refreshing a pipeline.
 type TogglePauseMsg struct{ Index int }
 
+// TriggerMsg asks the root model to re-run the selected pipeline's latest execution.
+type TriggerMsg struct{ Index int }
+
+// TriggerNewMsg asks the root model to start a brand-new execution of the selected pipeline.
+type TriggerNewMsg struct{ Index int }
+
 // Model is the pipeline list view.
 type Model struct {
 	Items  []PipelineItem
@@ -67,6 +73,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Items) > 0 {
 				idx := m.cursor
 				return m, func() tea.Msg { return TogglePauseMsg{Index: idx} }
+			}
+		case "R":
+			if len(m.Items) > 0 {
+				idx := m.cursor
+				return m, func() tea.Msg { return TriggerMsg{Index: idx} }
+			}
+		case "N":
+			if len(m.Items) > 0 {
+				idx := m.cursor
+				return m, func() tea.Msg { return TriggerNewMsg{Index: idx} }
 			}
 		}
 

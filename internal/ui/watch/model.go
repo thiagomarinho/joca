@@ -132,6 +132,8 @@ func renderStatus(s provider.Status, err error) string {
 		return styles.StatusFailed.Render("✗ failed")
 	case provider.StatusApproval:
 		return styles.StatusApproval.Render("⏸ awaiting approval")
+	case provider.StatusCancelled:
+		return styles.StatusCancelled.Render("⊘ cancelled")
 	case provider.StatusPending:
 		return styles.StatusPending.Render("… pending")
 	case provider.StatusIdle:

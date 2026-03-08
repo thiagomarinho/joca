@@ -4,24 +4,26 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Status dot colors
-	DotSuccess  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
-	DotFailed   = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
-	DotRunning  = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
-	DotApproval = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple
-	DotOther    = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
+	DotSuccess   = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+	DotFailed    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
+	DotRunning   = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+	DotApproval  = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple
+	DotCancelled = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
+	DotOther     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
 
 	// Provider badges
 	BadgeGH  = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237")).Padding(0, 1)
 	BadgeAWS = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("237")).Padding(0, 1)
 
 	// Status text
-	StatusRunning  = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true)
-	StatusSuccess  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	StatusFailed   = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	StatusApproval = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	StatusPending  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	StatusIdle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	StatusUnknown  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	StatusRunning   = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true)
+	StatusSuccess   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	StatusFailed    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	StatusApproval  = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	StatusCancelled = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	StatusPending   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	StatusIdle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	StatusUnknown   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	// List row
 	SelectedRow    = lipgloss.NewStyle().Background(lipgloss.Color("237")).Bold(true)

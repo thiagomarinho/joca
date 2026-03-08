@@ -136,6 +136,39 @@ func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) 
 	return runs, nil
 }
 
+func (c *Client) TriggerNew(ctx context.Context) error {
+	if c.workflow == "" {
+		return fmt.Errorf("workflow file required for new run; add it with `joca add github owner/repo workflow.yml`")
+	}
+	// Use the last run's branch as ref, falling back to "main".
+	ref := "main"
+	if runs, err := c.RecentRuns(ctx, 1); err == nil && len(runs) > 0 && runs[0].Branch != "" {
+		ref = runs[0].Branch
+	}
+	url := fmt.Sprintf("%s/repos/%s/%s/actions/workflows/%s/dispatches", apiBase, c.owner, c.repo, c.workflow)
+	body := strings.NewReader(fmt.Sprintf(`{"ref":%q}`, ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setGHHeaders(req, c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("dispatching workflow: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusUnprocessableEntity:
+		return fmt.Errorf("workflow does not support manual dispatch; add `workflow_dispatch:` to %s", c.workflow)
+	default:
+		return fmt.Errorf("github API returned %d", resp.StatusCode)
+	}
+}
+
 func (c *Client) Trigger(ctx context.Context) error {
 	// Re-run the latest failed/cancelled run via the re-run API.
 	runs, err := c.RecentRuns(ctx, 1)
@@ -198,6 +231,8 @@ func mapGHStatus(status, conclusion string) provider.Status {
 			return provider.StatusSuccess
 		case "failure", "timed_out":
 			return provider.StatusFailed
+		case "cancelled":
+			return provider.StatusCancelled
 		default:
 			return provider.StatusUnknown
 		}

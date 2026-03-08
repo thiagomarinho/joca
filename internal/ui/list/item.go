@@ -90,6 +90,8 @@ func renderStatus(s provider.Status, err error) string {
 		return styles.StatusFailed.Render("✗ failed")
 	case provider.StatusApproval:
 		return styles.StatusApproval.Render("⏸ awaiting approval")
+	case provider.StatusCancelled:
+		return styles.StatusCancelled.Render("⊘ cancelled")
 	case provider.StatusPending:
 		return styles.StatusPending.Render("… pending")
 	case provider.StatusIdle:
@@ -117,6 +119,8 @@ func renderDots(history []provider.Run) string {
 			sb.WriteString(styles.DotRunning.Render(styles.DotFull))
 		case provider.StatusApproval:
 			sb.WriteString(styles.DotApproval.Render(styles.DotFull))
+		case provider.StatusCancelled:
+			sb.WriteString(styles.DotCancelled.Render(styles.DotFull))
 		default:
 			sb.WriteString(styles.DotOther.Render(styles.DotEmpty))
 		}

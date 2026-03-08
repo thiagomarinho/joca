@@ -10,13 +10,14 @@ import (
 type Status string
 
 const (
-	StatusRunning  Status = "running"
-	StatusSuccess  Status = "success"
-	StatusFailed   Status = "failed"
-	StatusPending  Status = "pending"
-	StatusApproval Status = "awaiting approval"
-	StatusIdle     Status = "idle"
-	StatusUnknown  Status = "unknown"
+	StatusRunning   Status = "running"
+	StatusSuccess   Status = "success"
+	StatusFailed    Status = "failed"
+	StatusPending   Status = "pending"
+	StatusApproval  Status = "awaiting approval"
+	StatusCancelled Status = "cancelled"
+	StatusIdle      Status = "idle"
+	StatusUnknown   Status = "unknown"
 )
 
 // Run describes a single pipeline execution.
@@ -54,6 +55,8 @@ type Provider interface {
 	RecentRuns(ctx context.Context, n int) ([]Run, error)
 	// Trigger re-runs the latest execution.
 	Trigger(ctx context.Context) error
+	// TriggerNew starts a brand-new execution (workflow dispatch / pipeline start).
+	TriggerNew(ctx context.Context) error
 	// URL returns the web URL for this pipeline.
 	URL() string
 }

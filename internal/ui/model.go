@@ -40,6 +40,16 @@ type fetchResultMsg struct {
 	item  list.PipelineItem
 }
 
+type triggerDoneMsg struct {
+	index int
+	err   error
+}
+
+type triggerNewDoneMsg struct {
+	index int
+	err   error
+}
+
 // RootModel is the top-level Bubbletea model managing a view stack.
 type RootModel struct {
 	appCfg          *config.AppConfig
@@ -180,6 +190,30 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case list.TriggerMsg:
+		m.statusMsg = "Re-running…"
+		return m, m.triggerCmd(msg.Index)
+
+	case triggerDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Re-run failed: %v", msg.err)
+			return m, m.clearStatusAfter(3 * time.Second)
+		}
+		m.statusMsg = "Re-run triggered ✓"
+		return m, tea.Batch(m.clearStatusAfter(3*time.Second), m.fetchOneCmd(msg.index))
+
+	case list.TriggerNewMsg:
+		m.statusMsg = "Starting new run…"
+		return m, m.triggerNewCmd(msg.Index)
+
+	case triggerNewDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("New run failed: %v", msg.err)
+			return m, m.clearStatusAfter(3 * time.Second)
+		}
+		m.statusMsg = "New run started ✓"
+		return m, tea.Batch(m.clearStatusAfter(3*time.Second), m.fetchOneCmd(msg.index))
+
 	case uitelemetry.ClearMsg:
 		m.recorder.Clear()
 		return m, nil
@@ -252,7 +286,13 @@ func (m *RootModel) View() string {
 
 	// Footer bar
 	sb.WriteByte('\n')
-	footer := "  ↑↓: navigate  enter: detail  space: pause/resume  o: browser  a: add  r: refresh"
+	triggerHint := "R: re-run  N: new run" // default: GitHub
+	if listView, ok := m.stack[0].(list.Model); ok {
+		if item, ok := listView.Selected(); ok && item.Entry.Provider == config.ProviderAWS {
+			triggerHint = "R: new run"
+		}
+	}
+	footer := "  ↑↓: navigate  enter: detail  space: pause/resume  o: browser  a: add  r: refresh  " + triggerHint
 	if m.recorder.IsEnabled() {
 		footer += "  t: tracking ✓  T: telemetry"
 	} else {
@@ -304,6 +344,8 @@ func statusNotifyMessage(s provider.Status, run provider.Run) string {
 		base = "started running"
 	case provider.StatusApproval:
 		base = "awaiting approval"
+	case provider.StatusCancelled:
+		base = "cancelled"
 	case provider.StatusPending:
 		base = "pending"
 	case provider.StatusIdle:
@@ -531,6 +573,80 @@ func (m *RootModel) fetchAllCmd() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (m *RootModel) fetchOneCmd(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(m.providers) {
+		return nil
+	}
+	p := m.providers[idx]
+	entry := m.appCfg.Pipelines[idx]
+	rec := m.recorder
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		t0 := time.Now()
+		current, err := p.CurrentStatus(ctx)
+		rec.Record(telemetry.CallRecord{
+			Pipeline: entry.Name, Provider: string(entry.Provider),
+			Method: "CurrentStatus", At: t0, Duration: time.Since(t0), Err: err,
+		})
+
+		t1 := time.Now()
+		history, hErr := p.RecentRuns(ctx, 6)
+		rec.Record(telemetry.CallRecord{
+			Pipeline: entry.Name, Provider: string(entry.Provider),
+			Method: "RecentRuns", At: t1, Duration: time.Since(t1), Err: hErr,
+		})
+
+		_ = hErr
+		if err == nil && current.Status == provider.StatusApproval && current.ID != "" {
+			for j := range history {
+				if history[j].ID == current.ID {
+					history[j].Status = provider.StatusApproval
+					break
+				}
+			}
+		}
+
+		return fetchResultMsg{
+			index: idx,
+			item: list.PipelineItem{
+				Entry:   entry,
+				URL:     p.URL(),
+				Current: current,
+				History: history,
+				Err:     err,
+			},
+		}
+	}
+}
+
+func (m *RootModel) triggerCmd(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(m.providers) {
+		return nil
+	}
+	p := m.providers[idx]
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := p.Trigger(ctx)
+		return triggerDoneMsg{index: idx, err: err}
+	}
+}
+
+func (m *RootModel) triggerNewCmd(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(m.providers) {
+		return nil
+	}
+	p := m.providers[idx]
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := p.TriggerNew(ctx)
+		return triggerNewDoneMsg{index: idx, err: err}
+	}
+}
+
 // checkCredsCmd runs all credential checks concurrently and returns a single
 // credCheckDoneMsg when all are complete.
 func (m *RootModel) checkCredsCmd() tea.Cmd {
@@ -650,5 +766,6 @@ func (e *errorProvider) CurrentStatus(_ context.Context) (provider.Run, error) {
 func (e *errorProvider) RecentRuns(_ context.Context, _ int) ([]provider.Run, error) {
 	return nil, e.err
 }
-func (e *errorProvider) Trigger(_ context.Context) error { return e.err }
-func (e *errorProvider) URL() string                     { return e.url }
+func (e *errorProvider) Trigger(_ context.Context) error    { return e.err }
+func (e *errorProvider) TriggerNew(_ context.Context) error { return e.err }
+func (e *errorProvider) URL() string                        { return e.url }

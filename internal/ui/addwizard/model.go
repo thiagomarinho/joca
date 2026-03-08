@@ -677,6 +677,8 @@ func statusDot(s provider.Status) string {
 		return styles.DotFailed.Render(styles.DotFull)
 	case provider.StatusRunning:
 		return styles.DotRunning.Render(styles.DotFull)
+	case provider.StatusCancelled:
+		return styles.DotCancelled.Render(styles.DotFull)
 	default:
 		return styles.DotOther.Render(styles.DotEmpty)
 	}

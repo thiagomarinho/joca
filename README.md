@@ -63,7 +63,10 @@ joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 | `↓` / `j` | Move down |
 | `Enter` | Open pipeline detail / run logs |
 | `o` | Open in browser |
-| `r` | Refresh now |
+| `Space` | Pause / resume auto-refresh for pipeline |
+| `r` | Refresh all now |
+| `R` | Re-run latest execution (GitHub) / start new execution (AWS) |
+| `N` | Start a new run via workflow dispatch (GitHub only) |
 | `a` | Add pipeline (inline form) |
 | `q` / `Ctrl+C` | Quit |
 
@@ -73,7 +76,6 @@ joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 
 | Feature | Notes |
 |---------|-------|
-| Trigger / re-run pipeline (`R`) | `Trigger()` is already implemented in both providers; needs TUI wiring |
 | Delete pipeline (`d`) | Needs config write + inline confirm prompt |
 | Filter pipelines in list | Type-to-search, similar to the add wizard |
 | AWS approval action | Approve / reject from TUI when a pipeline awaits manual approval |
