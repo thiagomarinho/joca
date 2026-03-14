@@ -33,6 +33,20 @@ type Run struct {
 	Logs func(ctx context.Context) (string, error)
 }
 
+// IsSSOError reports whether err is likely caused by an expired or missing SSO
+// token. SSO failures are a subset of credential errors and should be checked first.
+func IsSSOError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sso token") ||
+		strings.Contains(msg, "token has expired") ||
+		strings.Contains(msg, "please re-run aws sso login") ||
+		strings.Contains(msg, "refresh token") ||
+		strings.Contains(msg, "sso session")
+}
+
 // IsCredentialError reports whether err is likely caused by missing or invalid
 // credentials rather than a transient network or API error.
 func IsCredentialError(err error) bool {

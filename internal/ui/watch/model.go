@@ -118,6 +118,9 @@ func renderBadge(k config.ProviderKind) string {
 
 func renderStatus(s provider.Status, err error) string {
 	if err != nil {
+		if provider.IsSSOError(err) {
+			return styles.StatusFailed.Render("✗ SSO expired")
+		}
 		if provider.IsCredentialError(err) {
 			return styles.StatusFailed.Render("✗ no credentials")
 		}

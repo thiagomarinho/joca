@@ -425,13 +425,19 @@ func (m *RootModel) credStatusView() string {
 	}
 	if !m.anyAWSPresent() {
 		for _, profile := range m.missingAWSProfiles() {
-			if profile == "" {
+			s := m.awsCreds[profile]
+			switch {
+			case profile == "":
 				helpLines = append(helpLines,
 					"  AWS CodePipeline — option 1: run `aws configure` (creates a default profile)",
 					"                    option 2: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
 					"                    option 3: run `joca add aws` and set a named profile",
 				)
-			} else {
+			case provider.IsSSOError(s.Err):
+				helpLines = append(helpLines,
+					fmt.Sprintf("  AWS profile %q — SSO token expired, run `aws sso login --profile %s`", profile, profile),
+				)
+			default:
 				helpLines = append(helpLines,
 					fmt.Sprintf("  AWS profile %q — run `aws configure --profile %s`", profile, profile),
 				)
@@ -456,6 +462,9 @@ func credLabel(name string, s credstatus.Status) string {
 	}
 	if s.Present {
 		return styles.CredOK.Render(name + " ✓ " + s.Source)
+	}
+	if provider.IsSSOError(s.Err) {
+		return styles.CredMissing.Render(name + " ✗ SSO expired")
 	}
 	return styles.CredMissing.Render(name + " ✗ not configured")
 }

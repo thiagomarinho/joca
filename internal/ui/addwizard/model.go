@@ -129,9 +129,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case awsCredCheckMsg:
 		m.awsChecking = false
 		if !msg.status.Present {
-			if m.awsProfile != "" {
-				m.err = fmt.Sprintf("no credentials found for profile %q", m.awsProfile)
-			} else {
+			switch {
+			case provider.IsSSOError(msg.status.Err):
+				m.err = fmt.Sprintf("SSO token expired — run `aws sso login --profile %s`", m.awsProfile)
+			case m.awsProfile != "":
+				m.err = fmt.Sprintf("no credentials found for profile %q: %v", m.awsProfile, msg.status.Err)
+			default:
 				m.err = "no AWS credentials found — set a profile or configure default credentials"
 			}
 			return m, nil

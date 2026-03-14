@@ -16,6 +16,7 @@ type Status struct {
 	Present bool
 	Pending bool   // true while async check is in progress
 	Source  string // e.g. "GITHUB_TOKEN", "gh session", `profile "prod"`, "env vars", "~/.aws/credentials"
+	Err     error  // non-nil when Present=false; used for diagnostic hints
 }
 
 // CheckGitHub reports whether GitHub credentials are available and where they come from.
@@ -44,10 +45,10 @@ func CheckAWS(profile string) Status {
 	}
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
-		return Status{Present: false}
+		return Status{Present: false, Err: err}
 	}
 	if _, err := cfg.Credentials.Retrieve(ctx); err != nil {
-		return Status{Present: false}
+		return Status{Present: false, Err: err}
 	}
 
 	return Status{Present: true, Source: awsSource(profile)}
