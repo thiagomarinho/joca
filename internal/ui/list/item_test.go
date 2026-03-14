@@ -49,6 +49,50 @@ func TestRender_emptyBranchRef(t *testing.T) {
 	}
 }
 
+func TestRender_runningWithStage(t *testing.T) {
+	item := PipelineItem{
+		Entry:   config.PipelineEntry{Name: "p", Provider: config.ProviderGitHub},
+		Current: provider.Run{Status: provider.StatusRunning, Stage: "Deploy"},
+	}
+	out := item.Render(false, 20)
+	if !strings.Contains(out, "● Deploy") {
+		t.Errorf("expected '● Deploy' in output, got: %q", out)
+	}
+}
+
+func TestRender_runningNoStage(t *testing.T) {
+	item := PipelineItem{
+		Entry:   config.PipelineEntry{Name: "p", Provider: config.ProviderGitHub},
+		Current: provider.Run{Status: provider.StatusRunning},
+	}
+	out := item.Render(false, 20)
+	if !strings.Contains(out, "● running") {
+		t.Errorf("expected '● running' in output, got: %q", out)
+	}
+}
+
+func TestRender_approvalWithStage(t *testing.T) {
+	item := PipelineItem{
+		Entry:   config.PipelineEntry{Name: "p", Provider: config.ProviderGitHub},
+		Current: provider.Run{Status: provider.StatusApproval, Stage: "Deploy"},
+	}
+	out := item.Render(false, 20)
+	if !strings.Contains(out, "⏸ → Deploy") {
+		t.Errorf("expected '⏸ → Deploy' in output, got: %q", out)
+	}
+}
+
+func TestRender_approvalNoStage(t *testing.T) {
+	item := PipelineItem{
+		Entry:   config.PipelineEntry{Name: "p", Provider: config.ProviderGitHub},
+		Current: provider.Run{Status: provider.StatusApproval},
+	}
+	out := item.Render(false, 20)
+	if !strings.Contains(out, "⏸ awaiting approval") {
+		t.Errorf("expected '⏸ awaiting approval' in output, got: %q", out)
+	}
+}
+
 func TestRenderBranchRef(t *testing.T) {
 	tests := []struct {
 		branch, commit string

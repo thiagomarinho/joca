@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +80,54 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 	if len(runs) == 0 {
 		return provider.Run{Status: provider.StatusIdle}, nil
 	}
-	return runs[0], nil
+	run := runs[0]
+	if run.Status == provider.StatusRunning || run.Status == provider.StatusApproval {
+		if runID, err := strconv.ParseInt(run.ID, 10, 64); err == nil {
+			run.Stage = c.fetchCurrentJob(ctx, runID)
+		}
+	}
+	return run, nil
+}
+
+// fetchCurrentJob returns the name of the first in-progress job for a run,
+// or "" if none found or the call fails.
+func (c *Client) fetchCurrentJob(ctx context.Context, runID int64) string {
+	url := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/jobs?filter=latest&per_page=20", apiBase, c.owner, c.repo, runID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ""
+	}
+	setGHHeaders(req, c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var payload struct {
+		Jobs []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"jobs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return ""
+	}
+	// Prefer the actively-running job; fall back to queued/waiting.
+	var pending string
+	for _, j := range payload.Jobs {
+		switch j.Status {
+		case "in_progress":
+			return j.Name
+		case "queued", "waiting":
+			if pending == "" {
+				pending = j.Name
+			}
+		}
+	}
+	return pending
 }
 
 func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) {

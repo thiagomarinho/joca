@@ -77,6 +77,88 @@ func TestCurrentStatus_empty_returnsIdle(t *testing.T) {
 	}
 }
 
+func TestCurrentStatus_running_fetchesJobStage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"workflow_runs": []map[string]any{
+				{
+					"id":          int64(42),
+					"head_branch": "main",
+					"head_sha":    "a1b2c3d4e5f6789",
+					"status":      "in_progress",
+					"conclusion":  "",
+					"created_at":  time.Now().Format(time.RFC3339),
+					"html_url":    "https://github.com/owner/repo/actions/runs/42",
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/repos/owner/repo/actions/runs/42/jobs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jobs": []map[string]any{
+				{"name": "Build", "status": "in_progress"},
+			},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	transport := rewriteTransport(srv.URL)
+	client := gh.NewWithToken("owner", "repo", "", "tok", &http.Client{Transport: transport})
+
+	run, err := client.CurrentStatus(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentStatus() error: %v", err)
+	}
+	if run.Stage != "Build" {
+		t.Errorf("Stage = %q, want %q", run.Stage, "Build")
+	}
+}
+
+func TestCurrentStatus_approval_fetchesJobStage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"workflow_runs": []map[string]any{
+				{
+					"id":          int64(99),
+					"head_branch": "main",
+					"head_sha":    "a1b2c3d4e5f6789",
+					"status":      "waiting",
+					"conclusion":  "",
+					"created_at":  time.Now().Format(time.RFC3339),
+					"html_url":    "https://github.com/owner/repo/actions/runs/99",
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/repos/owner/repo/actions/runs/99/jobs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jobs": []map[string]any{
+				{"name": "Deploy to prod", "status": "waiting"},
+			},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	transport := rewriteTransport(srv.URL)
+	client := gh.NewWithToken("owner", "repo", "", "tok", &http.Client{Transport: transport})
+
+	run, err := client.CurrentStatus(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentStatus() error: %v", err)
+	}
+	if run.Stage != "Deploy to prod" {
+		t.Errorf("Stage = %q, want %q", run.Stage, "Deploy to prod")
+	}
+}
+
 // rewriteTransport returns an http.RoundTripper that rewrites all requests to baseURL.
 type rewriteTransport string
 

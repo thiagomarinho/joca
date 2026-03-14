@@ -74,10 +74,14 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 	if execID != "" {
 		url = c.executionURL(execID)
 	}
+	stage := currentStage(out.StageStates)
+	if status == provider.StatusApproval {
+		stage = stageAfterApproval(out.StageStates)
+	}
 	return provider.Run{
 		ID:        execID,
 		Status:    status,
-		Stage:     currentStage(out.StageStates),
+		Stage:     stage,
 		StartedAt: aws.ToTime(out.Updated),
 		URL:       url,
 	}, nil
@@ -129,6 +133,25 @@ func shortSHA(s string) string {
 		return s[:7]
 	}
 	return s
+}
+
+func stageAfterApproval(stages []types.StageState) string {
+	for i, s := range stages {
+		if s.LatestExecution == nil || s.LatestExecution.Status != types.StageExecutionStatusInProgress {
+			continue
+		}
+		for _, action := range s.ActionStates {
+			if action.LatestExecution != nil &&
+				action.LatestExecution.Status == types.ActionExecutionStatusInProgress &&
+				action.LatestExecution.Token != nil {
+				if i+1 < len(stages) {
+					return aws.ToString(stages[i+1].StageName)
+				}
+				return aws.ToString(s.StageName) // last stage fallback
+			}
+		}
+	}
+	return ""
 }
 
 func currentStage(stages []types.StageState) string {

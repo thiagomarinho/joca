@@ -34,7 +34,7 @@ func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 	name := styles.PipelineName.Width(nameWidth).Render(truncate(p.Entry.Name, nameWidth))
 	badge := renderBadge(p.Entry.Provider)
 	branchRef := renderBranchRef(p.Current.Branch, p.Current.Commit)
-	status := renderStatus(p.Current.Status, p.Err)
+	status := renderStatus(p.Current.Status, p.Current.Stage, p.Err)
 	dots := renderDots(p.History)
 
 	// Pad status to a fixed visible width so the dots column stays aligned
@@ -76,7 +76,7 @@ func renderBadge(k config.ProviderKind) string {
 	return rendered
 }
 
-func renderStatus(s provider.Status, err error) string {
+func renderStatus(s provider.Status, stage string, err error) string {
 	if err != nil {
 		if provider.IsCredentialError(err) {
 			return styles.StatusFailed.Render("✗ no credentials")
@@ -85,12 +85,18 @@ func renderStatus(s provider.Status, err error) string {
 	}
 	switch s {
 	case provider.StatusRunning:
+		if stage != "" {
+			return styles.StatusRunning.Render("● " + truncate(stage, 20))
+		}
 		return styles.StatusRunning.Render("● running")
 	case provider.StatusSuccess:
 		return styles.StatusSuccess.Render("✓ idle")
 	case provider.StatusFailed:
 		return styles.StatusFailed.Render("✗ failed")
 	case provider.StatusApproval:
+		if stage != "" {
+			return styles.StatusApproval.Render("⏸ → " + truncate(stage, 17))
+		}
 		return styles.StatusApproval.Render("⏸ awaiting approval")
 	case provider.StatusCancelled:
 		return styles.StatusCancelled.Render("⊘ cancelled")
