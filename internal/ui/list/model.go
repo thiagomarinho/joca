@@ -33,6 +33,9 @@ type TriggerMsg struct{ Index int }
 // TriggerNewMsg asks the root model to start a brand-new execution of the selected pipeline.
 type TriggerNewMsg struct{ Index int }
 
+// MoveItemMsg is emitted when the user reorders a pipeline row.
+type MoveItemMsg struct{ From, To int }
+
 // Model is the pipeline list view.
 type Model struct {
 	Items  []PipelineItem
@@ -83,6 +86,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Items) > 0 {
 				idx := m.cursor
 				return m, func() tea.Msg { return TriggerNewMsg{Index: idx} }
+			}
+		case "shift+up":
+			if m.cursor > 0 {
+				m.Items[m.cursor], m.Items[m.cursor-1] = m.Items[m.cursor-1], m.Items[m.cursor]
+				m.cursor--
+				from, to := m.cursor+1, m.cursor
+				return m, func() tea.Msg { return MoveItemMsg{From: from, To: to} }
+			}
+		case "shift+down":
+			if m.cursor < len(m.Items)-1 {
+				m.Items[m.cursor], m.Items[m.cursor+1] = m.Items[m.cursor+1], m.Items[m.cursor]
+				m.cursor++
+				from, to := m.cursor-1, m.cursor
+				return m, func() tea.Msg { return MoveItemMsg{From: from, To: to} }
 			}
 		}
 

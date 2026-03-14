@@ -190,6 +190,21 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case list.MoveItemMsg:
+		from, to := msg.From, msg.To
+		m.appCfg.Pipelines[from], m.appCfg.Pipelines[to] = m.appCfg.Pipelines[to], m.appCfg.Pipelines[from]
+		m.providers[from], m.providers[to] = m.providers[to], m.providers[from]
+		pFrom, pTo := m.paused[from], m.paused[to]
+		delete(m.paused, from)
+		delete(m.paused, to)
+		if pFrom {
+			m.paused[to] = true
+		}
+		if pTo {
+			m.paused[from] = true
+		}
+		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
+
 	case list.TriggerMsg:
 		m.statusMsg = "Re-running…"
 		return m, m.triggerCmd(msg.Index)
@@ -292,7 +307,7 @@ func (m *RootModel) View() string {
 			triggerHint = "R: new run"
 		}
 	}
-	footer := "  ↑↓: navigate  enter: detail  space: pause/resume  o: browser  a: add  r: refresh  " + triggerHint
+	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  o: browser  a: add  r: refresh  " + triggerHint
 	if m.recorder.IsEnabled() {
 		footer += "  t: tracking ✓  T: telemetry"
 	} else {
@@ -500,6 +515,13 @@ func (m *RootModel) forwardToActive(msg tea.Msg) tea.Cmd {
 	updated, cmd := m.stack[idx].Update(msg)
 	m.stack[idx] = updated
 	return cmd
+}
+
+func saveConfigCmd(path string, cfg *config.AppConfig) tea.Cmd {
+	return func() tea.Msg {
+		_ = config.Save(path, cfg)
+		return nil
+	}
 }
 
 func (m *RootModel) clearStatusAfter(d time.Duration) tea.Cmd {
