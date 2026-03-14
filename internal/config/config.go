@@ -28,6 +28,8 @@ type PipelineEntry struct {
 	PipelineName string `yaml:"pipeline_name,omitempty"`
 	AWSProfile   string `yaml:"aws_profile,omitempty"`
 	AWSRegion    string `yaml:"aws_region,omitempty"`
+
+	Paused bool `yaml:"paused,omitempty"`
 }
 
 // AppConfig holds the persistent user configuration stored in ~/.joca/config.yaml.

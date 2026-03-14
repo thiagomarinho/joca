@@ -82,6 +82,13 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 	providers := buildProviders(appCfg.Pipelines)
 	items := makeItems(appCfg.Pipelines)
 
+	paused := make(map[int]bool)
+	for i, e := range appCfg.Pipelines {
+		if e.Paused {
+			paused[i] = true
+		}
+	}
+
 	// Pre-populate awsCreds keys with pending sentinels so the view has the
 	// right set of profiles before the async check completes.
 	awsCreds := make(map[string]credstatus.Status)
@@ -99,7 +106,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		refreshInterval: interval,
 		stack:           []tea.Model{list.New(items)},
 		prevStatus:      make(map[string]provider.Status),
-		paused:          make(map[int]bool),
+		paused:          paused,
 		recorder:        telemetry.NewRecorder(),
 		ghCred:          credstatus.Status{Pending: true},
 		awsCreds:        awsCreds,
@@ -183,12 +190,14 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case list.TogglePauseMsg:
-		m.paused[msg.Index] = !m.paused[msg.Index]
+		idx := msg.Index
+		m.paused[idx] = !m.paused[idx]
+		m.appCfg.Pipelines[idx].Paused = m.paused[idx]
 		if listView, ok := m.stack[0].(list.Model); ok {
-			listView.Items[msg.Index].Paused = m.paused[msg.Index]
+			listView.Items[idx].Paused = m.paused[idx]
 			m.stack[0] = listView
 		}
-		return m, nil
+		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
 
 	case list.MoveItemMsg:
 		from, to := msg.From, msg.To
@@ -741,7 +750,7 @@ func buildProviders(entries []config.PipelineEntry) []provider.Provider {
 func makeItems(entries []config.PipelineEntry) []list.PipelineItem {
 	items := make([]list.PipelineItem, len(entries))
 	for i, e := range entries {
-		items[i] = list.PipelineItem{Entry: e}
+		items[i] = list.PipelineItem{Entry: e, Paused: e.Paused}
 	}
 	return items
 }
