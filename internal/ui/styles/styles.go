@@ -32,7 +32,10 @@ var (
 	MarkerSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
 	// Name column
-	PipelineName = lipgloss.NewStyle().Width(20)
+	PipelineName = lipgloss.NewStyle()
+
+	// Branch/commit reference column
+	BranchRef = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // cyan
 
 	// Header / footer
 	Header = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).BorderBottom(true).BorderStyle(lipgloss.NormalBorder())

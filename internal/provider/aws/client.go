@@ -95,8 +95,14 @@ func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) 
 	runs := make([]provider.Run, 0, len(out.PipelineExecutionSummaries))
 	for _, s := range out.PipelineExecutionSummaries {
 		execID := aws.ToString(s.PipelineExecutionId)
+		var commit, branch string
+		if len(s.SourceRevisions) > 0 {
+			commit = shortSHA(aws.ToString(s.SourceRevisions[0].RevisionId))
+		}
 		runs = append(runs, provider.Run{
 			ID:        execID,
+			Branch:    branch,
+			Commit:    commit,
 			Status:    mapAWSStatus(s.Status),
 			StartedAt: aws.ToTime(s.StartTime),
 			URL:       c.executionURL(execID),
@@ -117,6 +123,13 @@ func (c *Client) Trigger(ctx context.Context) error {
 
 // TriggerNew starts a new execution — identical to Trigger for AWS CodePipeline.
 func (c *Client) TriggerNew(ctx context.Context) error { return c.Trigger(ctx) }
+
+func shortSHA(s string) string {
+	if len(s) >= 7 {
+		return s[:7]
+	}
+	return s
+}
 
 func currentStage(stages []types.StageState) string {
 	for _, s := range stages {

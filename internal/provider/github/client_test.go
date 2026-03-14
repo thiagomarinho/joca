@@ -25,6 +25,7 @@ func TestRecentRuns_parsesResponse(t *testing.T) {
 		{
 			"id":          int64(1),
 			"head_branch": "main",
+			"head_sha":    "a1b2c3d4e5f6789",
 			"status":      "completed",
 			"conclusion":  "success",
 			"created_at":  time.Now().Format(time.RFC3339),
@@ -33,6 +34,7 @@ func TestRecentRuns_parsesResponse(t *testing.T) {
 		{
 			"id":          int64(2),
 			"head_branch": "feat",
+			"head_sha":    "deadbeef1234567",
 			"status":      "completed",
 			"conclusion":  "failure",
 			"created_at":  time.Now().Add(-time.Hour).Format(time.RFC3339),
@@ -54,6 +56,9 @@ func TestRecentRuns_parsesResponse(t *testing.T) {
 	}
 	if runs[0].Branch != "main" {
 		t.Errorf("run[0].Branch = %q, want main", runs[0].Branch)
+	}
+	if runs[0].Commit != "a1b2c3d" {
+		t.Errorf("run[0].Commit = %q, want a1b2c3d", runs[0].Commit)
 	}
 }
 

@@ -104,10 +104,19 @@ func (m Model) View() string {
 			styles.FormCursor.Render("a"))
 	}
 
+	// Fixed overhead per row (excluding name column):
+	// 2 (indent) + 1 (marker) + 1 (space) + nameWidth + 1 (space) + 5 (badge) +
+	// 2 (spaces) + 16 (branchRef) + 2 (spaces) + 22 (status) + 1 (space) + 11 (dots)
+	const fixedOverhead = 64
+	nameWidth := 30
+	if m.width > fixedOverhead+10 {
+		nameWidth = m.width - fixedOverhead
+	}
+
 	var sb strings.Builder
 	for i, item := range m.Items {
 		sb.WriteString("  ")
-		sb.WriteString(item.Render(i == m.cursor))
+		sb.WriteString(item.Render(i == m.cursor, nameWidth))
 		sb.WriteByte('\n')
 	}
 	return sb.String()

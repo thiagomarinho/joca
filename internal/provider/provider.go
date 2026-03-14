@@ -24,6 +24,7 @@ const (
 type Run struct {
 	ID        string
 	Branch    string
+	Commit    string // short SHA (7 chars), best-effort
 	Status    Status
 	Stage     string // current stage name (AWS) or empty (GitHub)
 	StartedAt time.Time

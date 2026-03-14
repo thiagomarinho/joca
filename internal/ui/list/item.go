@@ -25,13 +25,15 @@ type PipelineItem struct {
 
 // Render returns the single-line string for this row.
 // highlighted controls whether the selected-row style is applied.
-func (p PipelineItem) Render(highlighted bool) string {
+// nameWidth is the visible character width to use for the name column.
+func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 	marker := " "
 	if p.Paused {
 		marker = styles.DotOther.Render("⏸")
 	}
-	name := styles.PipelineName.Render(truncate(p.Entry.Name, 20))
+	name := styles.PipelineName.Width(nameWidth).Render(truncate(p.Entry.Name, nameWidth))
 	badge := renderBadge(p.Entry.Provider)
+	branchRef := renderBranchRef(p.Current.Branch, p.Current.Commit)
 	status := renderStatus(p.Current.Status, p.Err)
 	dots := renderDots(p.History)
 
@@ -42,7 +44,7 @@ func (p PipelineItem) Render(highlighted bool) string {
 		status += strings.Repeat(" ", pad)
 	}
 
-	line := fmt.Sprintf("%s %s %s  %s %s", marker, name, badge, status, dots)
+	line := fmt.Sprintf("%s %s %s  %s  %s %s", marker, name, badge, branchRef, status, dots)
 	switch {
 	case highlighted && p.Paused:
 		return styles.SelectedRow.Render(styles.PausedRow.Render(line))
@@ -126,6 +128,29 @@ func renderDots(history []provider.Run) string {
 		}
 	}
 	return sb.String()
+}
+
+const branchRefWidth = 16
+
+// renderBranchRef returns a fixed-width (branchRefWidth) string showing
+// "branch@sha", "branch", "sha", or spaces when neither is available.
+func renderBranchRef(branch, commit string) string {
+	var ref string
+	switch {
+	case branch != "" && commit != "":
+		ref = branch + "@" + commit
+	case branch != "":
+		ref = branch
+	case commit != "":
+		ref = commit
+	}
+	if len(ref) > branchRefWidth {
+		ref = ref[:branchRefWidth-1] + "…"
+	}
+	if pad := branchRefWidth - len(ref); pad > 0 {
+		ref += strings.Repeat(" ", pad)
+	}
+	return styles.BranchRef.Render(ref)
 }
 
 func truncate(s string, max int) string {

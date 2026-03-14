@@ -109,6 +109,7 @@ func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) 
 		WorkflowRuns []struct {
 			ID         int64     `json:"id"`
 			HeadBranch string    `json:"head_branch"`
+			HeadSHA    string    `json:"head_sha"`
 			Status     string    `json:"status"`
 			Conclusion string    `json:"conclusion"`
 			CreatedAt  time.Time `json:"created_at"`
@@ -125,6 +126,7 @@ func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) 
 		runs = append(runs, provider.Run{
 			ID:        fmt.Sprintf("%d", r.ID),
 			Branch:    r.HeadBranch,
+			Commit:    shortSHA(r.HeadSHA),
 			Status:    mapGHStatus(r.Status, r.Conclusion),
 			StartedAt: r.CreatedAt,
 			URL:       r.HTMLURL,
@@ -217,6 +219,13 @@ func setGHHeaders(req *http.Request, token string) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+}
+
+func shortSHA(s string) string {
+	if len(s) >= 7 {
+		return s[:7]
+	}
+	return s
 }
 
 func mapGHStatus(status, conclusion string) provider.Status {
