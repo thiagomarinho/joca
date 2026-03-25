@@ -72,6 +72,21 @@ joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 
 ---
 
+## Status Colors
+
+| Status | Color | Description |
+|--------|-------|-------------|
+| `running` | 🟡 Yellow | Execution in progress |
+| `success` | 🟢 Green | Completed successfully |
+| `failed` | 🔴 Red | Completed with failure |
+| `approval` | 🟣 Purple | Waiting for manual approval |
+| `pending` | 🔵 Cyan | Queued, not yet started |
+| `cancelled` | ⚫ Grey | Execution was cancelled |
+| `idle` | ⚫ Grey | No recent executions |
+| `unknown` | ⚫ Grey | Status could not be determined |
+
+---
+
 ## Roadmap
 
 | Feature | Notes |
