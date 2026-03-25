@@ -124,11 +124,15 @@ func (m Model) View() string {
 			if !r.StartedAt.IsZero() {
 				age = "  " + humanAge(r.StartedAt)
 			}
+			statusText := renderDetailStatus(r)
 			line := fmt.Sprintf("  %s  #%s  %-8s  %s%s",
-				dot, r.ID, r.Branch, string(r.Status), age)
-			if i == m.cursor {
+				dot, r.ID, r.Branch, statusText, age)
+			switch {
+			case i == m.cursor:
 				sb.WriteString(styles.SelectedRow.Render(line))
-			} else {
+			case r.Status == provider.StatusApproval:
+				sb.WriteString(styles.ApprovalRow.Render(line))
+			default:
 				sb.WriteString(line)
 			}
 			sb.WriteByte('\n')
@@ -150,6 +154,28 @@ func (m Model) View() string {
 	sb.WriteString("\n  ")
 	sb.WriteString(styles.Footer.Render("↑↓: select run  o: open in browser  esc: back"))
 	return sb.String()
+}
+
+func renderDetailStatus(r provider.Run) string {
+	switch r.Status {
+	case provider.StatusRunning:
+		return styles.StatusRunning.Render(string(r.Status))
+	case provider.StatusSuccess:
+		return styles.StatusSuccess.Render(string(r.Status))
+	case provider.StatusFailed:
+		return styles.StatusFailed.Render(string(r.Status))
+	case provider.StatusApproval:
+		if r.Stage != "" {
+			return styles.StatusApproval.Render("⏸ → " + r.Stage)
+		}
+		return styles.StatusApproval.Render("⏸ awaiting approval")
+	case provider.StatusCancelled:
+		return styles.StatusCancelled.Render(string(r.Status))
+	case provider.StatusPending:
+		return styles.StatusPending.Render(string(r.Status))
+	default:
+		return styles.StatusUnknown.Render(string(r.Status))
+	}
 }
 
 func renderRunDot(s provider.Status) string {

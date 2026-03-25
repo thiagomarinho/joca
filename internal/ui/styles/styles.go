@@ -27,6 +27,7 @@ var (
 
 	// List row
 	SelectedRow    = lipgloss.NewStyle().Background(lipgloss.Color("237")).Bold(true)
+	ApprovalRow    = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple, matches DotApproval
 	UnselectedRow  = lipgloss.NewStyle()
 	PausedRow      = lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // dark grey
 	MarkerSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
