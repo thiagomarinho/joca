@@ -64,9 +64,10 @@ type RootModel struct {
 	// prevStatus tracks the last known status per pipeline name so we can
 	// detect changes and fire OS notifications. A nil map entry means the
 	// pipeline has never been fetched yet (suppress notification on first load).
-	prevStatus map[string]provider.Status
-	paused     map[int]bool // pipelines with auto-refresh disabled
-	recorder   *telemetry.Recorder
+	prevStatus   map[string]provider.Status
+	paused       map[int]bool // pipelines with auto-refresh disabled
+	globalPaused bool         // session-only global pause; not persisted
+	recorder     *telemetry.Recorder
 	// Credential status, always checked on startup regardless of configured pipelines.
 	ghCred   credstatus.Status
 	awsCreds map[string]credstatus.Status // key: aws_profile (or "" for default chain)
@@ -142,10 +143,20 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.stack) == 1 {
 				return m, tea.Quit
 			}
+		case "p":
+			if len(m.stack) == 1 {
+				m.globalPaused = !m.globalPaused
+				if m.globalPaused {
+					m.statusMsg = "Auto-refresh paused  (p to resume)"
+					return m, m.clearStatusAfter(2 * time.Second)
+				}
+				m.statusMsg = "Auto-refresh resumed"
+				return m, tea.Batch(m.clearStatusAfter(2*time.Second), m.fetchAllCmd())
+			}
 		case "r":
 			if len(m.stack) == 1 {
 				m.statusMsg = "Refreshing…"
-				return m, m.fetchAllCmd()
+				return m, m.fetchAllCmdInner()
 			}
 		case "t":
 			if len(m.stack) == 1 {
@@ -323,16 +334,19 @@ func (m *RootModel) View() string {
 			triggerHint = "R: new run"
 		}
 	}
-	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  o: browser  a: add  r: refresh  " + triggerHint
+	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  o: browser  a: add  r: refresh  " + triggerHint
 	if m.recorder.IsEnabled() {
 		footer += "  t: tracking ✓  T: telemetry"
 	} else {
 		footer += "  t: tracking"
 	}
 	footer += "  q: quit"
-	if m.statusMsg != "" {
+	switch {
+	case m.statusMsg != "":
 		footer = "  " + m.statusMsg
-	} else if !m.lastRefresh.IsZero() {
+	case m.globalPaused:
+		footer += "   ⏸ auto-refresh paused"
+	case !m.lastRefresh.IsZero():
 		nextIn := time.Until(m.lastRefresh.Add(m.refreshInterval)).Round(time.Second)
 		if nextIn < 0 {
 			nextIn = 0
@@ -566,6 +580,13 @@ func (m *RootModel) uiTickCmd() tea.Cmd {
 }
 
 func (m *RootModel) fetchAllCmd() tea.Cmd {
+	if m.globalPaused {
+		return nil
+	}
+	return m.fetchAllCmdInner()
+}
+
+func (m *RootModel) fetchAllCmdInner() tea.Cmd {
 	cmds := make([]tea.Cmd, len(m.providers))
 	for i, p := range m.providers {
 		i, p := i, p
