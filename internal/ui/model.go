@@ -81,6 +81,9 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 
 	providers := buildProviders(appCfg.Pipelines)
 	items := makeItems(appCfg.Pipelines)
+	for i, p := range providers {
+		items[i].URL = p.URL()
+	}
 
 	paused := make(map[int]bool)
 	for i, e := range appCfg.Pipelines {
@@ -271,7 +274,11 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err == nil {
 			m.appCfg = newCfg
 			m.providers = buildProviders(newCfg.Pipelines)
-			m.stack[0] = list.New(makeItems(newCfg.Pipelines))
+			newItems := makeItems(newCfg.Pipelines)
+			for i, p := range m.providers {
+				newItems[i].URL = p.URL()
+			}
+			m.stack[0] = list.New(newItems)
 		}
 		return m, m.fetchAllCmd()
 
@@ -736,7 +743,11 @@ func buildProviders(entries []config.PipelineEntry) []provider.Provider {
 			case config.ProviderGitHub:
 				p, err := ghprovider.New(e.Owner, e.Repo, e.Workflow)
 				if err != nil {
-					providers[i] = &errorProvider{err: err, url: fmt.Sprintf("https://github.com/%s/%s/actions", e.Owner, e.Repo)}
+					ghURL := fmt.Sprintf("https://github.com/%s/%s/actions", e.Owner, e.Repo)
+					if e.Workflow != "" {
+						ghURL = fmt.Sprintf("https://github.com/%s/%s/actions/workflows/%s", e.Owner, e.Repo, e.Workflow)
+					}
+					providers[i] = &errorProvider{err: err, url: ghURL}
 				} else {
 					providers[i] = p
 				}
@@ -765,6 +776,9 @@ func makeItems(entries []config.PipelineEntry) []list.PipelineItem {
 }
 
 func openBrowser(url string) {
+	if url == "" {
+		return
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

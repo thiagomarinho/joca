@@ -68,7 +68,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "o":
 			if len(m.Items) > 0 {
-				return m, func() tea.Msg { return OpenBrowserMsg{URL: m.Items[m.cursor].Current.URL} }
+				item := m.Items[m.cursor]
+				url := item.Current.URL
+				if url == "" {
+					url = item.URL
+				}
+				return m, func() tea.Msg { return OpenBrowserMsg{URL: url} }
 			}
 		case "a":
 			return m, func() tea.Msg { return OpenAddFormMsg{} }

@@ -45,7 +45,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return backMsg{} }
 		case "o":
 			if len(m.items) > 0 {
-				url := m.items[m.cursor].Current.URL
+				item := m.items[m.cursor]
+				url := item.Current.URL
+				if url == "" {
+					url = item.URL
+				}
 				return m, func() tea.Msg { return list.OpenBrowserMsg{URL: url} }
 			}
 		}
