@@ -92,6 +92,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 			paused[i] = true
 		}
 	}
+	globalPaused := len(appCfg.Pipelines) > 0 && len(paused) == len(appCfg.Pipelines)
 
 	// Pre-populate awsCreds keys with pending sentinels so the view has the
 	// right set of profiles before the async check completes.
@@ -111,6 +112,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		stack:           []tea.Model{list.New(items)},
 		prevStatus:      make(map[string]provider.Status),
 		paused:          paused,
+		globalPaused:    globalPaused,
 		recorder:        telemetry.NewRecorder(),
 		ghCred:          credstatus.Status{Pending: true},
 		awsCreds:        awsCreds,
@@ -145,13 +147,25 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "p":
 			if len(m.stack) == 1 {
-				m.globalPaused = !m.globalPaused
 				if m.globalPaused {
-					m.statusMsg = "Auto-refresh paused  (p to resume)"
-					return m, m.clearStatusAfter(2 * time.Second)
+					allPaused := true
+					for i := range m.providers {
+						if !m.paused[i] {
+							allPaused = false
+							break
+						}
+					}
+					if allPaused {
+						m.statusMsg = "Resume individual pipelines first (space)"
+						return m, m.clearStatusAfter(3 * time.Second)
+					}
+					m.globalPaused = false
+					m.statusMsg = "Auto-refresh resumed"
+					return m, tea.Batch(m.clearStatusAfter(2*time.Second), m.fetchAllCmd())
 				}
-				m.statusMsg = "Auto-refresh resumed"
-				return m, tea.Batch(m.clearStatusAfter(2*time.Second), m.fetchAllCmd())
+				m.globalPaused = true
+				m.statusMsg = "Auto-refresh paused  (p to resume)"
+				return m, m.clearStatusAfter(2 * time.Second)
 			}
 		case "r":
 			if len(m.stack) == 1 {
@@ -210,6 +224,22 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if listView, ok := m.stack[0].(list.Model); ok {
 			listView.Items[idx].Paused = m.paused[idx]
 			m.stack[0] = listView
+		}
+		if m.globalPaused && !m.paused[idx] {
+			m.globalPaused = false
+			m.statusMsg = "Auto-refresh resumed"
+			return m, tea.Batch(saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg), m.clearStatusAfter(2*time.Second), m.fetchAllCmd())
+		} else if !m.globalPaused && len(m.providers) > 0 {
+			allPaused := true
+			for i := range m.providers {
+				if !m.paused[i] {
+					allPaused = false
+					break
+				}
+			}
+			if allPaused {
+				m.globalPaused = true
+			}
 		}
 		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
 
