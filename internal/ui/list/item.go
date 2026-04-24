@@ -13,14 +13,24 @@ import (
 
 const historyDots = 6
 
+// AutomationHints describes whether a pipeline participates in automation
+// rules, used to render small indicators in the list row.
+type AutomationHints struct {
+	Watched         bool // watch source of at least one active rule
+	Target          bool // trigger target of at least one active rule
+	WatchedDisabled bool // watch source of disabled/exhausted rules only
+	TargetDisabled  bool // trigger target of disabled/exhausted rules only
+}
+
 // PipelineItem holds the runtime state of a single pipeline row.
 type PipelineItem struct {
-	Entry   config.PipelineEntry
-	URL     string // pipeline-level page (e.g. /actions or AWS console)
-	Current provider.Run
-	History []provider.Run // most recent first, up to historyDots
-	Err     error          // set if last fetch failed
-	Paused  bool           // true when the user has disabled auto-refresh
+	Entry           config.PipelineEntry
+	URL             string // pipeline-level page (e.g. /actions or AWS console)
+	Current         provider.Run
+	History         []provider.Run // most recent first, up to historyDots
+	Err             error          // set if last fetch failed
+	Paused          bool           // true when the user has disabled auto-refresh
+	AutomationHints AutomationHints
 }
 
 // Render returns the single-line string for this row.
@@ -36,6 +46,7 @@ func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 	branchRef := renderBranchRef(p.Current.Branch, p.Current.Commit)
 	status := renderStatus(p.Current.Status, p.Current.Stage, p.Err)
 	dots := renderDots(p.History)
+	automation := renderAutomationHints(p.AutomationHints)
 
 	// Pad status to a fixed visible width so the dots column stays aligned
 	// regardless of ANSI escape codes in the status string.
@@ -44,7 +55,7 @@ func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 		status += strings.Repeat(" ", pad)
 	}
 
-	line := fmt.Sprintf("%s %s %s  %s  %s %s", marker, name, badge, branchRef, status, dots)
+	line := fmt.Sprintf("%s %s %s %s  %s  %s %s", marker, automation, name, badge, branchRef, status, dots)
 	switch {
 	case highlighted && p.Paused:
 		return styles.SelectedRow.Render(styles.PausedRow.Render(line))
@@ -167,4 +178,28 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// renderAutomationHints returns a fixed 4-visible-char column for the list
+// row, positioned to the left of the name. Active rules render in colour;
+// exhausted/disabled rules render dimmed so they remain visible.
+func renderAutomationHints(h AutomationHints) string {
+	var watch, target string
+	switch {
+	case h.Watched:
+		watch = styles.AutomationWatch.Render("⬡→")
+	case h.WatchedDisabled:
+		watch = styles.AutomationWatchDim.Render("⬡→")
+	default:
+		watch = "  "
+	}
+	switch {
+	case h.Target:
+		target = styles.AutomationTarget.Render("→⬡")
+	case h.TargetDisabled:
+		target = styles.AutomationTargetDim.Render("→⬡")
+	default:
+		target = "  "
+	}
+	return watch + target
 }

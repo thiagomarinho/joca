@@ -25,6 +25,10 @@ func Load(path string) (*AppConfig, error) {
 	if cfg.RefreshInterval == "" {
 		cfg.RefreshInterval = "30s"
 	}
+	if cfg.AutomationAllowChains == nil {
+		v := true
+		cfg.AutomationAllowChains = &v
+	}
 	return &cfg, nil
 }
 
@@ -57,6 +61,63 @@ func AddPipeline(path string, entry PipelineEntry) error {
 	}
 	cfg.Pipelines = append(cfg.Pipelines, entry)
 	return Save(path, cfg)
+}
+
+// AddAutomation appends rule to the config at path, returning an error if a
+// rule with the same name already exists or a cycle would be introduced.
+func AddAutomation(path string, rule AutomationRule) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+	for _, r := range cfg.Automations {
+		if r.Name == rule.Name {
+			return fmt.Errorf("automation rule %q already exists", rule.Name)
+		}
+	}
+	allowChains := cfg.AllowChains()
+	if err := CheckAutomationCycle(cfg.Automations, rule, allowChains); err != nil {
+		return err
+	}
+	cfg.Automations = append(cfg.Automations, rule)
+	return Save(path, cfg)
+}
+
+// DeleteAutomation removes the rule with the given name from the config at path.
+func DeleteAutomation(path string, name string) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+	found := false
+	keep := cfg.Automations[:0]
+	for _, r := range cfg.Automations {
+		if r.Name == name {
+			found = true
+		} else {
+			keep = append(keep, r)
+		}
+	}
+	if !found {
+		return fmt.Errorf("automation rule %q not found", name)
+	}
+	cfg.Automations = keep
+	return Save(path, cfg)
+}
+
+// UpdateAutomation replaces the rule matching rule.Name in the config at path.
+func UpdateAutomation(path string, rule AutomationRule) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+	for i, r := range cfg.Automations {
+		if r.Name == rule.Name {
+			cfg.Automations[i] = rule
+			return Save(path, cfg)
+		}
+	}
+	return fmt.Errorf("automation rule %q not found", rule.Name)
 }
 
 func parentDir(path string) string {

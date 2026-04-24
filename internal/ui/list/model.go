@@ -21,6 +21,9 @@ type OpenDetailMsg struct{ Item PipelineItem }
 // OpenAddFormMsg asks the root model to push the add-pipeline form.
 type OpenAddFormMsg struct{}
 
+// OpenAutomationsMsg asks the root model to push the automation rules view.
+type OpenAutomationsMsg struct{}
+
 // OpenBrowserMsg asks the OS to open a URL.
 type OpenBrowserMsg struct{ URL string }
 
@@ -77,6 +80,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "a":
 			return m, func() tea.Msg { return OpenAddFormMsg{} }
+		case "A":
+			return m, func() tea.Msg { return OpenAutomationsMsg{} }
 		case " ":
 			if len(m.Items) > 0 {
 				idx := m.cursor
@@ -127,9 +132,10 @@ func (m Model) View() string {
 	}
 
 	// Fixed overhead per row (excluding name column):
-	// 2 (indent) + 1 (marker) + 1 (space) + nameWidth + 1 (space) + 5 (badge) +
-	// 2 (spaces) + 16 (branchRef) + 2 (spaces) + 22 (status) + 1 (space) + 11 (dots)
-	const fixedOverhead = 64
+	// 2 (indent) + 1 (marker) + 1 (space) + 4 (hints) + 1 (space) + nameWidth +
+	// 1 (space) + 5 (badge) + 2 (spaces) + 16 (branchRef) + 2 (spaces) +
+	// 22 (status) + 1 (space) + 11 (dots)
+	const fixedOverhead = 69
 	nameWidth := 30
 	if m.width > fixedOverhead+10 {
 		nameWidth = m.width - fixedOverhead

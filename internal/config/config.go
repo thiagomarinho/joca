@@ -34,8 +34,19 @@ type PipelineEntry struct {
 
 // AppConfig holds the persistent user configuration stored in ~/.joca/config.yaml.
 type AppConfig struct {
-	RefreshInterval string          `yaml:"refresh_interval"`
-	Pipelines       []PipelineEntry `yaml:"pipelines"`
+	RefreshInterval string           `yaml:"refresh_interval"`
+	Pipelines       []PipelineEntry  `yaml:"pipelines"`
+	Automations     []AutomationRule `yaml:"automations,omitempty"`
+	// AutomationAllowChains controls whether automation rules may form chains
+	// (A triggers B, B triggers C). Self-references are always prohibited.
+	// Defaults to true when omitted from YAML.
+	AutomationAllowChains *bool `yaml:"automation_allow_chains,omitempty"`
+}
+
+// AllowChains reports whether automation rule chaining is permitted.
+// Returns true when the field is unset (default).
+func (c *AppConfig) AllowChains() bool {
+	return c.AutomationAllowChains == nil || *c.AutomationAllowChains
 }
 
 // Config holds values derived from global flags and environment.

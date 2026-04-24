@@ -19,7 +19,9 @@ import (
 	awsprovider "github.com/thiagomarinho/joca/internal/provider/aws"
 	ghprovider "github.com/thiagomarinho/joca/internal/provider/github"
 	"github.com/thiagomarinho/joca/internal/telemetry"
+	"github.com/thiagomarinho/joca/internal/ui/addautomation"
 	"github.com/thiagomarinho/joca/internal/ui/addwizard"
+	"github.com/thiagomarinho/joca/internal/ui/automations"
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
@@ -48,6 +50,12 @@ type triggerDoneMsg struct {
 type triggerNewDoneMsg struct {
 	index int
 	err   error
+}
+
+type automationFiredMsg struct {
+	ruleName       string
+	targetPipeline string
+	err            error
 }
 
 // RootModel is the top-level Bubbletea model managing a view stack.
@@ -118,6 +126,7 @@ func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
 		awsCreds:        awsCreds,
 	}
 
+	m.applyAutomationHints()
 	return m
 }
 
@@ -208,14 +217,25 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fetchResultMsg:
 		m.lastRefresh = time.Now()
 		m.statusMsg = ""
+		prev, seen := m.prevStatus[msg.item.Entry.Name]
 		m.maybeNotify(msg.item)
 		// Update the list view's item
 		listView, ok := m.stack[0].(list.Model)
 		if ok && msg.index >= 0 && msg.index < len(listView.Items) {
+			msg.item.AutomationHints = listView.Items[msg.index].AutomationHints
 			listView.Items[msg.index] = msg.item
 			m.stack[0] = listView
 		}
-		return m, nil
+		// Evaluate automation rules on status transitions.
+		newStatus := msg.item.Current.Status
+		if msg.item.Err != nil {
+			newStatus = provider.StatusUnknown
+		}
+		var automationCmd tea.Cmd
+		if seen && prev != newStatus {
+			automationCmd = m.evaluateAutomations(msg.item.Entry.Name, prev, newStatus)
+		}
+		return m, automationCmd
 
 	case list.TogglePauseMsg:
 		idx := msg.Index
@@ -282,6 +302,14 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "New run started ✓"
 		return m, tea.Batch(m.clearStatusAfter(3*time.Second), m.fetchOneCmd(msg.index))
 
+	case automationFiredMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("automation %q failed: %v", msg.ruleName, msg.err)
+		} else {
+			m.statusMsg = fmt.Sprintf("automation: triggered %q ✓", msg.targetPipeline)
+		}
+		return m, m.clearStatusAfter(4 * time.Second)
+
 	case uitelemetry.ClearMsg:
 		m.recorder.Clear()
 		return m, nil
@@ -321,6 +349,7 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.stack[0] = list.New(newItems)
 		}
+		m.applyAutomationHints()
 		return m, m.fetchAllCmd()
 
 	case addwizard.CancelledMsg:
@@ -328,6 +357,82 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stack = m.stack[:len(m.stack)-1]
 		}
 		return m, nil
+
+	// ── Automation views ─────────────────────────────────────────────────────
+	case list.OpenAutomationsMsg:
+		m.stack = append(m.stack, automations.New(m.appCfg.Automations))
+		return m, nil
+
+	case automations.OpenAddMsg:
+		names := make([]string, len(m.appCfg.Pipelines))
+		for i, p := range m.appCfg.Pipelines {
+			names[i] = p.Name
+		}
+		m.stack = append(m.stack, addautomation.New(names, m.appCfg.Automations, m.appCfg.AllowChains()))
+		return m, nil
+
+	case addautomation.SavedMsg:
+		// Pop the add wizard, add rules to config and persist.
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		m.appCfg.Automations = append(m.appCfg.Automations, msg.Rules...)
+		// Update the automations list view if it's still on the stack.
+		for i, v := range m.stack {
+			if av, ok := v.(automations.Model); ok {
+				av.Rules = append(av.Rules, msg.Rules...)
+				m.stack[i] = av
+				break
+			}
+		}
+		if len(msg.Rules) == 1 {
+			m.statusMsg = fmt.Sprintf("Automation rule %q added", msg.Rules[0].Name)
+		} else {
+			m.statusMsg = fmt.Sprintf("%d automation rules added", len(msg.Rules))
+		}
+		m.applyAutomationHints()
+		return m, tea.Batch(saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg), m.clearStatusAfter(3*time.Second))
+
+	case addautomation.CancelledMsg:
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		return m, nil
+
+	case automations.DeletedMsg:
+		// Persist deletion.
+		keep := m.appCfg.Automations[:0]
+		for _, r := range m.appCfg.Automations {
+			if r.Name != msg.Name {
+				keep = append(keep, r)
+			}
+		}
+		m.appCfg.Automations = keep
+		m.applyAutomationHints()
+		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
+
+	case automations.ToggledMsg:
+		// Persist enable/disable or reset changes.
+		for i, v := range m.stack {
+			if av, ok := v.(automations.Model); ok {
+				// Sync changed rule back to appCfg.
+				for _, r := range av.Rules {
+					if r.Name == msg.Name {
+						for j, ar := range m.appCfg.Automations {
+							if ar.Name == msg.Name {
+								m.appCfg.Automations[j] = r
+								break
+							}
+						}
+						break
+					}
+				}
+				m.stack[i] = av
+				break
+			}
+		}
+		m.applyAutomationHints()
+		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
 
 	default:
 		// detail back message — handled via type assertion on string
@@ -364,7 +469,7 @@ func (m *RootModel) View() string {
 			triggerHint = "R: new run"
 		}
 	}
-	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  o: browser  a: add  r: refresh  " + triggerHint
+	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  o: browser  a: add  A: automations  r: refresh  " + triggerHint
 	if m.recorder.IsEnabled() {
 		footer += "  t: tracking ✓  T: telemetry"
 	} else {
@@ -743,6 +848,111 @@ func (m *RootModel) triggerNewCmd(idx int) tea.Cmd {
 		err := p.TriggerNew(ctx)
 		return triggerNewDoneMsg{index: idx, err: err}
 	}
+}
+
+// applyAutomationHints recomputes AutomationHints for all items in the list
+// view based on the current automation rules.
+func (m *RootModel) applyAutomationHints() {
+	listView, ok := m.stack[0].(list.Model)
+	if !ok {
+		return
+	}
+	// Index pipeline name → item index for quick lookup.
+	nameToIdx := make(map[string]int, len(listView.Items))
+	for i, item := range listView.Items {
+		nameToIdx[item.Entry.Name] = i
+		listView.Items[i].AutomationHints = list.AutomationHints{}
+	}
+	for _, rule := range m.appCfg.Automations {
+		if rule.Disabled {
+			if idx, ok := nameToIdx[rule.WatchPipeline]; ok {
+				if !listView.Items[idx].AutomationHints.Watched {
+					listView.Items[idx].AutomationHints.WatchedDisabled = true
+				}
+			}
+			if idx, ok := nameToIdx[rule.TriggerPipeline]; ok {
+				if !listView.Items[idx].AutomationHints.Target {
+					listView.Items[idx].AutomationHints.TargetDisabled = true
+				}
+			}
+			continue
+		}
+		if idx, ok := nameToIdx[rule.WatchPipeline]; ok {
+			listView.Items[idx].AutomationHints.Watched = true
+			listView.Items[idx].AutomationHints.WatchedDisabled = false
+		}
+		if idx, ok := nameToIdx[rule.TriggerPipeline]; ok {
+			listView.Items[idx].AutomationHints.Target = true
+			listView.Items[idx].AutomationHints.TargetDisabled = false
+		}
+	}
+	m.stack[0] = listView
+}
+
+// findProviderByName returns the index of the provider whose pipeline entry has
+// the given name, or (-1, false) if none found.
+func (m *RootModel) findProviderByName(name string) (int, bool) {
+	for i, e := range m.appCfg.Pipelines {
+		if e.Name == name {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// evaluateAutomations checks all enabled automation rules that watch pipelineName
+// transitioning to nextStatus. Matching rules fire TriggerNew on their target
+// pipeline. FireCount is incremented and rules are marked disabled when exhausted.
+func (m *RootModel) evaluateAutomations(pipelineName string, prev, next provider.Status) tea.Cmd {
+	_ = prev // used only for the transition guard in the caller
+	nextStr := string(next)
+
+	var cmds []tea.Cmd
+	for i, rule := range m.appCfg.Automations {
+		if rule.Disabled {
+			continue
+		}
+		if rule.WatchPipeline != pipelineName {
+			continue
+		}
+		if rule.OnStatus != nextStr {
+			continue
+		}
+
+		// Capture loop vars.
+		i := i
+		rule := rule
+
+		idx, ok := m.findProviderByName(rule.TriggerPipeline)
+		if !ok {
+			continue
+		}
+		p := m.providers[idx]
+		targetName := rule.TriggerPipeline
+		ruleName := rule.Name
+
+		// Update fire count and disabled flag immediately (optimistic).
+		m.appCfg.Automations[i].FireCount++
+		if rule.MaxFires > 0 && m.appCfg.Automations[i].FireCount >= rule.MaxFires {
+			m.appCfg.Automations[i].Disabled = true
+		}
+
+		configFile := m.resolvedCfg.ConfigFile
+		appCfg := m.appCfg
+
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err := p.TriggerNew(ctx)
+			// Persist updated fire count / disabled flag.
+			_ = config.Save(configFile, appCfg)
+			return automationFiredMsg{ruleName: ruleName, targetPipeline: targetName, err: err}
+		})
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // checkCredsCmd runs all credential checks concurrently and returns a single

@@ -58,6 +58,15 @@ var (
 	FormInput  = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 	FormCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	FormError  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+
+	// Automation hints shown in the pipeline list row.
+	// AutomationWatch = pipeline is watched by a rule (will trigger another).
+	// AutomationTarget = pipeline is a trigger target of a rule.
+	// Dim variants are used when all matching rules are disabled/exhausted.
+	AutomationWatch     = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+	AutomationTarget    = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // cyan
+	AutomationWatchDim  = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
+	AutomationTargetDim = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey
 )
 
 const (
