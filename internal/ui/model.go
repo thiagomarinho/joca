@@ -147,9 +147,16 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.forwardToActive(msg)
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
+		// ctrl+c always quits.
+		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		// When the list's search prompt is open, forward every key to it so
+		// that letters like q/p/r/t type into the query instead of firing shortcuts.
+		if lm, ok := m.stack[0].(list.Model); ok && lm.IsSearching() {
+			return m, m.forwardToActive(msg)
+		}
+		switch msg.String() {
 		case "q":
 			if len(m.stack) == 1 {
 				return m, tea.Quit
@@ -469,7 +476,7 @@ func (m *RootModel) View() string {
 			triggerHint = "R: new run"
 		}
 	}
-	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  h: hide/show paused  o: browser  a: add  A: automations  r: refresh  " + triggerHint
+	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  h: hide/show paused  /: search  o: browser  a: add  A: automations  r: refresh  " + triggerHint
 	if m.recorder.IsEnabled() {
 		footer += "  t: tracking ✓  T: telemetry"
 	} else {

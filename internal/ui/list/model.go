@@ -45,26 +45,42 @@ type Model struct {
 	cursor     int
 	height     int
 	width      int
-	HidePaused bool // when true, paused pipelines are not rendered
+	HidePaused bool   // when true, paused pipelines are not rendered
+	searching  bool   // true while the search prompt is open
+	query      string // current fuzzy-filter query
 }
 
-// visibleIdx returns the indices of Items that are currently shown.
-// When HidePaused is false every index is returned, keeping cursor semantics identical.
+// IsSearching reports whether the search prompt is currently open.
+func (m Model) IsSearching() bool { return m.searching }
+
+// visibleIdx returns the indices of Items that are currently shown,
+// applying both the HidePaused and fuzzy-query filters.
 func (m Model) visibleIdx() []int {
-	if !m.HidePaused {
-		idx := make([]int, len(m.Items))
-		for i := range m.Items {
-			idx[i] = i
-		}
-		return idx
-	}
 	var idx []int
 	for i, item := range m.Items {
-		if !item.Paused {
-			idx = append(idx, i)
+		if m.HidePaused && item.Paused {
+			continue
 		}
+		if m.query != "" && !fuzzyMatch(m.query, item.Entry.Name) {
+			continue
+		}
+		idx = append(idx, i)
 	}
 	return idx
+}
+
+// fuzzyMatch reports whether all runes in query appear as a subsequence
+// (in order, case-insensitive) in target. This is the same algorithm used
+// by fzf and vim-style fuzzy finders — no external dependency required.
+func fuzzyMatch(query, target string) bool {
+	qr := []rune(strings.ToLower(query))
+	qi := 0
+	for _, r := range strings.ToLower(target) {
+		if qi < len(qr) && qr[qi] == r {
+			qi++
+		}
+	}
+	return qi == len(qr)
 }
 
 func New(items []PipelineItem) Model {
@@ -76,8 +92,52 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Search mode: capture printable chars; allow navigation; esc/enter exit.
+		if m.searching {
+			switch msg.String() {
+			case "esc":
+				m.searching = false
+				m.query = ""
+				m.cursor = 0
+			case "enter":
+				m.searching = false
+			case "backspace", "ctrl+h":
+				if len(m.query) > 0 {
+					runes := []rune(m.query)
+					m.query = string(runes[:len(runes)-1])
+					m.cursor = 0
+				}
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "down", "j":
+				vi := m.visibleIdx()
+				if m.cursor < len(vi)-1 {
+					m.cursor++
+				}
+			default:
+				if len(msg.Runes) > 0 {
+					m.query += string(msg.Runes)
+					m.cursor = 0
+				}
+			}
+			vi := m.visibleIdx()
+			if len(vi) > 0 && m.cursor >= len(vi) {
+				m.cursor = len(vi) - 1
+			}
+			return m, nil
+		}
+
 		vi := m.visibleIdx()
 		switch msg.String() {
+		case "/":
+			m.searching = true
+		case "esc":
+			if m.query != "" {
+				m.query = ""
+				m.cursor = 0
+			}
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -169,8 +229,15 @@ func (m Model) View() string {
 
 	vi := m.visibleIdx()
 	if len(vi) == 0 {
-		return fmt.Sprintf("\n  All pipelines are paused. Press %s to show them.\n",
-			styles.FormCursor.Render("h"))
+		var sb strings.Builder
+		if m.query != "" {
+			fmt.Fprintf(&sb, "\n  No pipelines match %s\n", styles.FormInput.Render(m.query))
+		} else {
+			fmt.Fprintf(&sb, "\n  All pipelines are paused. Press %s to show them.\n",
+				styles.FormCursor.Render("h"))
+		}
+		sb.WriteString(m.searchBarView())
+		return sb.String()
 	}
 
 	// Fixed overhead per row (excluding name column):
@@ -189,7 +256,20 @@ func (m Model) View() string {
 		sb.WriteString(m.Items[realIdx].Render(visPos == m.cursor, nameWidth))
 		sb.WriteByte('\n')
 	}
+	sb.WriteString(m.searchBarView())
 	return sb.String()
+}
+
+// searchBarView returns the search prompt line (or filter indicator) to append
+// at the bottom of the list content.
+func (m Model) searchBarView() string {
+	if m.searching {
+		return "\n  " + styles.FormCursor.Render("/") + " " + m.query + styles.FormCursor.Render("▋") + "\n"
+	}
+	if m.query != "" {
+		return "\n  " + styles.Footer.Render("filter: "+m.query+"  (esc to clear)") + "\n"
+	}
+	return ""
 }
 
 // Selected returns the currently highlighted item, or false if the visible list is empty.

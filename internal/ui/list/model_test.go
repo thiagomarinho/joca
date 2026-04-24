@@ -285,3 +285,150 @@ func TestHidePaused_allPausedEmptyVisible(t *testing.T) {
 		t.Error("expected Selected to return false when no visible items")
 	}
 }
+
+// --- Fuzzy search tests ---
+
+// typeSearch sends "/" to enter search mode, then types the given query one
+// rune at a time.
+func typeSearch(m Model, query string) Model {
+	m = sendKey(m, "/")
+	for _, r := range query {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	return m
+}
+
+func TestFuzzyMatch_basicSubsequence(t *testing.T) {
+	cases := []struct {
+		query, target string
+		want          bool
+	}{
+		{"abc", "abcdef", true},
+		{"ace", "abcde", true},
+		{"aec", "abcde", false}, // wrong order
+		{"ABC", "abcde", true},  // case-insensitive
+		{"", "anything", true},  // empty query matches everything
+		{"abc", "", false},      // non-empty query, empty target
+		{"deploy", "deploy-prod", true},
+		{"dprd", "deploy-prod", true},
+		{"xyz", "abcdef", false},
+	}
+	for _, tc := range cases {
+		got := fuzzyMatch(tc.query, tc.target)
+		if got != tc.want {
+			t.Errorf("fuzzyMatch(%q, %q) = %v, want %v", tc.query, tc.target, got, tc.want)
+		}
+	}
+}
+
+func TestSearch_entersSearchMode(t *testing.T) {
+	m := makeTestModel("alpha", "beta", "gamma")
+	if m.IsSearching() {
+		t.Fatal("expected not searching initially")
+	}
+	m = sendKey(m, "/")
+	if !m.IsSearching() {
+		t.Error("expected IsSearching=true after /")
+	}
+}
+
+func TestSearch_typingFiltersVisibleItems(t *testing.T) {
+	m := makeTestModel("deploy-prod", "deploy-staging", "build-prod")
+	m = typeSearch(m, "dep")
+
+	vi := m.visibleIdx()
+	if len(vi) != 2 {
+		t.Fatalf("expected 2 matches for 'dep', got %d", len(vi))
+	}
+	if m.Items[vi[0]].Entry.Name != "deploy-prod" || m.Items[vi[1]].Entry.Name != "deploy-staging" {
+		t.Errorf("unexpected matched items: %v", vi)
+	}
+}
+
+func TestSearch_enterConfirmsAndKeepsFilter(t *testing.T) {
+	m := makeTestModel("foo", "bar", "foobar")
+	m = typeSearch(m, "foo")
+	m = sendKey(m, "enter")
+
+	if m.IsSearching() {
+		t.Error("expected IsSearching=false after enter")
+	}
+	if m.query != "foo" {
+		t.Errorf("expected query to remain 'foo', got %q", m.query)
+	}
+	vi := m.visibleIdx()
+	if len(vi) != 2 {
+		t.Errorf("expected 2 items still filtered, got %d", len(vi))
+	}
+}
+
+func TestSearch_escClearsQueryAndExitsMode(t *testing.T) {
+	m := makeTestModel("foo", "bar")
+	m = typeSearch(m, "foo")
+	m = sendKey(m, "esc")
+
+	if m.IsSearching() {
+		t.Error("expected not searching after esc")
+	}
+	if m.query != "" {
+		t.Errorf("expected empty query after esc, got %q", m.query)
+	}
+	if len(m.visibleIdx()) != 2 {
+		t.Error("expected all items visible after clearing query")
+	}
+}
+
+func TestSearch_escWhenNotSearchingClearsActiveFilter(t *testing.T) {
+	m := makeTestModel("foo", "bar", "baz")
+	m = typeSearch(m, "ba")
+	m = sendKey(m, "enter") // confirm filter, exit search mode
+
+	// Now pressing esc clears the residual filter
+	m = sendKey(m, "esc")
+	if m.query != "" {
+		t.Errorf("expected query cleared by esc, got %q", m.query)
+	}
+	if len(m.visibleIdx()) != 3 {
+		t.Error("expected all 3 items visible after esc clear")
+	}
+}
+
+func TestSearch_backspaceRemovesChar(t *testing.T) {
+	m := makeTestModel("foo", "bar")
+	m = typeSearch(m, "fo")
+	m = sendKey(m, "backspace")
+
+	if m.query != "f" {
+		t.Errorf("expected query 'f' after backspace, got %q", m.query)
+	}
+}
+
+func TestSearch_selectedReturnsFilteredItem(t *testing.T) {
+	m := makeTestModel("alpha", "beta", "gamma")
+	m = typeSearch(m, "bet")
+
+	item, ok := m.Selected()
+	if !ok {
+		t.Fatal("expected Selected to return true")
+	}
+	if item.Entry.Name != "beta" {
+		t.Errorf("expected 'beta', got %q", item.Entry.Name)
+	}
+}
+
+func TestSearch_resetsCursorOnEachChar(t *testing.T) {
+	m := makeTestModel("alpha", "beta", "gamma")
+	m = sendKey(m, "/")
+	// Navigate down first
+	m = sendKey(m, "j")
+	if m.cursor != 1 {
+		t.Fatalf("expected cursor=1, got %d", m.cursor)
+	}
+	// Typing a char should reset cursor to 0
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = updated.(Model)
+	if m.cursor != 0 {
+		t.Errorf("expected cursor reset to 0 after typing, got %d", m.cursor)
+	}
+}
