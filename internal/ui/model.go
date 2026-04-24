@@ -469,7 +469,7 @@ func (m *RootModel) View() string {
 			triggerHint = "R: new run"
 		}
 	}
-	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  o: browser  a: add  A: automations  r: refresh  " + triggerHint
+	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  h: hide/show paused  o: browser  a: add  A: automations  r: refresh  " + triggerHint
 	if m.recorder.IsEnabled() {
 		footer += "  t: tracking ✓  T: telemetry"
 	} else {

@@ -119,3 +119,169 @@ func TestMove_atBottom_noOp(t *testing.T) {
 		t.Errorf("expected items unchanged, last item is %s", m2.Items[2].Entry.Name)
 	}
 }
+
+// --- HidePaused tests ---
+
+func makeModelWithPaused(specs ...struct {
+	name   string
+	paused bool
+}) Model {
+	items := make([]PipelineItem, len(specs))
+	for i, s := range specs {
+		items[i] = PipelineItem{
+			Entry:  config.PipelineEntry{Name: s.name},
+			Paused: s.paused,
+		}
+	}
+	return New(items)
+}
+
+func sendKey(m Model, key string) Model {
+	updated, _ := m.Update(keyMsgFromString(key))
+	return updated.(Model)
+}
+
+func TestHidePaused_togglesField(t *testing.T) {
+	m := makeTestModel("a", "b", "c")
+	if m.HidePaused {
+		t.Fatal("expected HidePaused=false by default")
+	}
+	m = sendKey(m, "h")
+	if !m.HidePaused {
+		t.Error("expected HidePaused=true after h")
+	}
+	m = sendKey(m, "h")
+	if m.HidePaused {
+		t.Error("expected HidePaused=false after second h")
+	}
+}
+
+func TestHidePaused_visibleIdxFilters(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"a", false},
+		struct {
+			name   string
+			paused bool
+		}{"b", true},
+		struct {
+			name   string
+			paused bool
+		}{"c", false},
+	)
+	m.HidePaused = true
+	vi := m.visibleIdx()
+	if len(vi) != 2 {
+		t.Fatalf("expected 2 visible items, got %d", len(vi))
+	}
+	if vi[0] != 0 || vi[1] != 2 {
+		t.Errorf("expected indices [0 2], got %v", vi)
+	}
+}
+
+func TestHidePaused_clampsCursorOnToggle(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"a", false},
+		struct {
+			name   string
+			paused bool
+		}{"b", false},
+		struct {
+			name   string
+			paused bool
+		}{"c", true},
+	)
+	// Move cursor to item c (index 2)
+	m = setCursor(m, 2)
+	if m.cursor != 2 {
+		t.Fatalf("expected cursor=2, got %d", m.cursor)
+	}
+	// Hide paused — c disappears, cursor must clamp to 1 (last visible)
+	m = sendKey(m, "h")
+	if m.cursor != 1 {
+		t.Errorf("expected cursor clamped to 1, got %d", m.cursor)
+	}
+}
+
+func TestHidePaused_navigationStaysWithinVisible(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"a", false},
+		struct {
+			name   string
+			paused bool
+		}{"b", true},
+		struct {
+			name   string
+			paused bool
+		}{"c", false},
+	)
+	m.HidePaused = true
+	// cursor=0 → visible item 0 (Items index 0 = "a")
+	// down → cursor=1 → visible item 1 (Items index 2 = "c")
+	m = sendKey(m, "j")
+	if m.cursor != 1 {
+		t.Fatalf("expected cursor=1, got %d", m.cursor)
+	}
+	// down again — already at last visible, no change
+	m = sendKey(m, "j")
+	if m.cursor != 1 {
+		t.Errorf("expected cursor still 1, got %d", m.cursor)
+	}
+}
+
+func TestHidePaused_selectedReturnsVisibleItem(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"a", false},
+		struct {
+			name   string
+			paused bool
+		}{"b", true},
+		struct {
+			name   string
+			paused bool
+		}{"c", false},
+	)
+	m.HidePaused = true
+	m = sendKey(m, "j") // cursor → visible index 1 (Items[2] = "c")
+
+	item, ok := m.Selected()
+	if !ok {
+		t.Fatal("expected Selected to return true")
+	}
+	if item.Entry.Name != "c" {
+		t.Errorf("expected selected item 'c', got '%s'", item.Entry.Name)
+	}
+}
+
+func TestHidePaused_allPausedEmptyVisible(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"a", true},
+		struct {
+			name   string
+			paused bool
+		}{"b", true},
+	)
+	m.HidePaused = true
+	vi := m.visibleIdx()
+	if len(vi) != 0 {
+		t.Errorf("expected 0 visible items, got %d", len(vi))
+	}
+	_, ok := m.Selected()
+	if ok {
+		t.Error("expected Selected to return false when no visible items")
+	}
+}
