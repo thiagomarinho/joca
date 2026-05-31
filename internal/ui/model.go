@@ -476,26 +476,31 @@ func (m *RootModel) View() string {
 			triggerHint = "R: new run"
 		}
 	}
-	footer := "  ↑↓: navigate  S↑↓: reorder  enter: detail  space: pause/resume  p: pause all  h: hide/show paused  /: search  o: browser  a: add  A: automations  r: refresh  " + triggerHint
+
+	// Two-line footer: line1 = primary actions, line2 = secondary actions + status
+	footerLine1 := "  ↑↓: navigate  enter: detail  o: browser  /: search  space: pause  r: refresh  " + triggerHint + "  q: quit"
+	footerLine2 := "  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  A: automations"
 	if m.recorder.IsEnabled() {
-		footer += "  t: tracking ✓  T: telemetry"
+		footerLine2 += "  t: tracking ✓  T: telemetry"
 	} else {
-		footer += "  t: tracking"
+		footerLine2 += "  t: tracking"
 	}
-	footer += "  q: quit"
+
 	switch {
 	case m.statusMsg != "":
-		footer = "  " + m.statusMsg
+		footerLine1 = "  " + m.statusMsg
 	case m.globalPaused:
-		footer += "   ⏸ auto-refresh paused"
+		footerLine1 += "   ⏸ auto-refresh paused"
 	case !m.lastRefresh.IsZero():
 		nextIn := time.Until(m.lastRefresh.Add(m.refreshInterval)).Round(time.Second)
 		if nextIn < 0 {
 			nextIn = 0
 		}
-		footer += fmt.Sprintf("   refresh in %s", humanDur(nextIn))
+		footerLine1 += fmt.Sprintf("   refresh in %s", humanDur(nextIn))
 	}
-	sb.WriteString(styles.Footer.Render(footer))
+	sb.WriteString(styles.Footer.Render(footerLine1))
+	sb.WriteByte('\n')
+	sb.WriteString(styles.Footer.Render(footerLine2))
 
 	return sb.String()
 }
