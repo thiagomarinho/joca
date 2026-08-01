@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/credstatus"
 	"github.com/thiagomarinho/joca/internal/ui/list"
+	"github.com/thiagomarinho/joca/internal/ui/settings"
 )
 
 func TestTogglePauseWhilePausedPipelinesHiddenClampsCursor(t *testing.T) {
@@ -73,6 +75,35 @@ func TestFocusResumesSelectedPipelineAndPausesOthers(t *testing.T) {
 	item, ok := listView.Selected()
 	if !ok || item.Entry.Name != "second" {
 		t.Fatalf("focused list selection = %#v, %v", item, ok)
+	}
+}
+
+func TestSettingsSaveUpdatesRuntimeAndConfiguration(t *testing.T) {
+	appCfg := &config.AppConfig{RefreshInterval: "30s"}
+	m := New(appCfg, config.Config{ConfigFile: filepath.Join(t.TempDir(), "config.yaml")})
+	m.stack = append(m.stack, settings.New(*appCfg))
+
+	_, cmd := m.Update(settings.SavedMsg{
+		RefreshInterval:   "2m",
+		DefaultAWSProfile: "production",
+		DefaultAWSRegion:  "ca-central-1",
+	})
+	if cmd == nil {
+		t.Fatal("expected persistence and timer commands")
+	}
+	if len(m.stack) != 1 {
+		t.Errorf("settings page was not closed; stack length = %d", len(m.stack))
+	}
+	if m.refreshInterval != 2*time.Minute {
+		t.Errorf("runtime refresh interval = %v, want 2m", m.refreshInterval)
+	}
+	if appCfg.DefaultAWSProfile != "production" || appCfg.DefaultAWSRegion != "ca-central-1" {
+		t.Errorf("AWS defaults were not updated: %#v", appCfg)
+	}
+
+	_, staleCmd := m.Update(tickMsg{generation: 0})
+	if staleCmd != nil {
+		t.Error("expected stale refresh timer to be ignored")
 	}
 }
 

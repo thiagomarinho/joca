@@ -56,6 +56,15 @@ func TestLoadAWSProfileSuggestionsIgnoresMissingFiles(t *testing.T) {
 	}
 }
 
+func TestNewAppliesConfiguredAWSDefaults(t *testing.T) {
+	t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+	m := New("", "production", "ca-central-1")
+	if m.awsProfile != "production" || m.awsRegion != "ca-central-1" {
+		t.Errorf("AWS defaults = profile %q region %q", m.awsProfile, m.awsRegion)
+	}
+}
+
 func TestApplyAWSProfileSuggestionCompletesProfileAndRegion(t *testing.T) {
 	m := Model{
 		awsProfile: "pro",

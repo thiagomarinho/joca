@@ -31,7 +31,9 @@ go build \
 joca stores its config at `~/.joca/config.yaml`.
 
 ```yaml
-refresh_interval: 30s
+refresh_interval: 30s # minimum: 10s
+default_aws_profile: production  # optional; prefills the AWS add wizard
+default_aws_region: ca-central-1 # optional; prefills the AWS add wizard
 pipelines:
   - name: my-app CI
     provider: github
@@ -79,6 +81,7 @@ choose a suggestion and `→` to complete it.
 | `a` | Add pipeline (inline form) |
 | `c` | Copy the selected pipeline and customize its settings |
 | `d` | Delete the selected pipeline after confirmation |
+| `s` | Open application configuration |
 | `q` / `Ctrl+C` | Quit |
 
 ---

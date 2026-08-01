@@ -96,12 +96,14 @@ type Model struct {
 	err string
 }
 
-// New creates a fresh wizard model.
-func New(configFile string) Model {
+// New creates a fresh wizard model with AWS defaults from application settings.
+func New(configFile, defaultAWSProfile, defaultAWSRegion string) Model {
 	return Model{
 		configFile:  configFile,
 		wfSelected:  make(map[int]bool),
 		awsProfiles: discoverAWSProfiles(),
+		awsProfile:  defaultAWSProfile,
+		awsRegion:   defaultAWSRegion,
 	}
 }
 

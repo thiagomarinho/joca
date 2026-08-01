@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -17,10 +18,42 @@ func TestLoad_missingFile_returnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_clampsRefreshIntervalToMinimum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("refresh_interval: 2s\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.RefreshInterval != config.MinRefreshInterval.String() {
+		t.Errorf("refresh_interval = %q, want %q", cfg.RefreshInterval, config.MinRefreshInterval)
+	}
+}
+
+func TestLoad_invalidRefreshIntervalUsesDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("refresh_interval: immediately\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.RefreshInterval != config.DefaultRefreshInterval.String() {
+		t.Errorf("refresh_interval = %q, want %q", cfg.RefreshInterval, config.DefaultRefreshInterval)
+	}
+}
+
 func TestSaveAndLoad_roundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	original := &config.AppConfig{
-		RefreshInterval: "60s",
+		RefreshInterval:   "60s",
+		DefaultAWSProfile: "production",
+		DefaultAWSRegion:  "ca-central-1",
 		Pipelines: []config.PipelineEntry{
 			{Name: "my-api", Provider: config.ProviderGitHub, Owner: "acme", Repo: "my-api"},
 			{Name: "infra", Provider: config.ProviderAWS, PipelineName: "infra-deploy", AWSRegion: "us-east-1"},
@@ -35,6 +68,12 @@ func TestSaveAndLoad_roundtrip(t *testing.T) {
 	}
 	if loaded.RefreshInterval != "60s" {
 		t.Errorf("refresh_interval: got %q, want 60s", loaded.RefreshInterval)
+	}
+	if loaded.DefaultAWSProfile != "production" {
+		t.Errorf("default_aws_profile: got %q, want production", loaded.DefaultAWSProfile)
+	}
+	if loaded.DefaultAWSRegion != "ca-central-1" {
+		t.Errorf("default_aws_region: got %q, want ca-central-1", loaded.DefaultAWSRegion)
 	}
 	if len(loaded.Pipelines) != 2 {
 		t.Fatalf("expected 2 pipelines, got %d", len(loaded.Pipelines))

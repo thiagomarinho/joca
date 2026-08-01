@@ -14,7 +14,7 @@ func Load(path string) (*AppConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &AppConfig{RefreshInterval: "30s"}, nil
+			return &AppConfig{RefreshInterval: DefaultRefreshInterval.String()}, nil
 		}
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
@@ -22,9 +22,7 @@ func Load(path string) (*AppConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
-	if cfg.RefreshInterval == "" {
-		cfg.RefreshInterval = "30s"
-	}
+	cfg.RefreshInterval = NormalizeRefreshInterval(cfg.RefreshInterval)
 	if cfg.AutomationAllowChains == nil {
 		v := true
 		cfg.AutomationAllowChains = &v

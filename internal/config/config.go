@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // ProviderKind identifies a CI/CD provider.
@@ -12,7 +13,33 @@ type ProviderKind string
 const (
 	ProviderGitHub ProviderKind = "github"
 	ProviderAWS    ProviderKind = "aws"
+
+	DefaultRefreshInterval = 30 * time.Second
+	MinRefreshInterval     = 10 * time.Second
 )
+
+// EffectiveRefreshInterval returns a safe runtime refresh interval. Invalid
+// values use the default, while values below the minimum are clamped.
+func EffectiveRefreshInterval(value string) time.Duration {
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return DefaultRefreshInterval
+	}
+	if duration < MinRefreshInterval {
+		return MinRefreshInterval
+	}
+	return duration
+}
+
+// NormalizeRefreshInterval preserves valid configured values and replaces
+// invalid or too-small values with their safe effective interval.
+func NormalizeRefreshInterval(value string) string {
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < MinRefreshInterval {
+		return EffectiveRefreshInterval(value).String()
+	}
+	return value
+}
 
 // PipelineEntry describes a single pipeline to track.
 type PipelineEntry struct {
@@ -34,9 +61,11 @@ type PipelineEntry struct {
 
 // AppConfig holds the persistent user configuration stored in ~/.joca/config.yaml.
 type AppConfig struct {
-	RefreshInterval string           `yaml:"refresh_interval"`
-	Pipelines       []PipelineEntry  `yaml:"pipelines"`
-	Automations     []AutomationRule `yaml:"automations,omitempty"`
+	RefreshInterval   string           `yaml:"refresh_interval"`
+	DefaultAWSProfile string           `yaml:"default_aws_profile,omitempty"`
+	DefaultAWSRegion  string           `yaml:"default_aws_region,omitempty"`
+	Pipelines         []PipelineEntry  `yaml:"pipelines"`
+	Automations       []AutomationRule `yaml:"automations,omitempty"`
 	// AutomationAllowChains controls whether automation rules may form chains
 	// (A triggers B, B triggers C). Self-references are always prohibited.
 	// Defaults to true when omitted from YAML.

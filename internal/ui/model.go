@@ -26,11 +26,14 @@ import (
 	"github.com/thiagomarinho/joca/internal/ui/deletepipeline"
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
+	"github.com/thiagomarinho/joca/internal/ui/settings"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
 	uitelemetry "github.com/thiagomarinho/joca/internal/ui/telemetry"
 )
 
-type tickMsg time.Time
+type tickMsg struct {
+	generation uint64
+}
 type uiTickMsg time.Time
 type clearStatusMsg struct{}
 
@@ -72,6 +75,7 @@ type RootModel struct {
 	providers       []provider.Provider
 	stack           []tea.Model // stack[len-1] is the active view
 	refreshInterval time.Duration
+	tickGeneration  uint64
 	lastRefresh     time.Time
 	width           int
 	height          int
@@ -90,10 +94,7 @@ type RootModel struct {
 
 // New builds the root model from the loaded app config.
 func New(appCfg *config.AppConfig, resolvedCfg config.Config) *RootModel {
-	interval := 30 * time.Second
-	if d, err := time.ParseDuration(appCfg.RefreshInterval); err == nil {
-		interval = d
-	}
+	interval := config.EffectiveRefreshInterval(appCfg.RefreshInterval)
 
 	providers := buildProviders(appCfg.Pipelines)
 	items := makeItems(appCfg.Pipelines)
@@ -221,6 +222,11 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, awsSSOLoginCmd(profile)
 				}
 			}
+		case "s":
+			if len(m.stack) == 1 {
+				m.stack = append(m.stack, settings.New(*m.appCfg))
+				return m, nil
+			}
 		}
 		return m, m.forwardToActive(msg)
 
@@ -246,6 +252,9 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.uiTickCmd()
 
 	case tickMsg:
+		if msg.generation != m.tickGeneration {
+			return m, nil
+		}
 		return m, tea.Batch(m.tickCmd(), m.fetchAllCmd())
 
 	case fetchResultMsg:
@@ -384,7 +393,11 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case list.OpenAddFormMsg:
-		m.stack = append(m.stack, addwizard.New(m.resolvedCfg.ConfigFile))
+		m.stack = append(m.stack, addwizard.New(
+			m.resolvedCfg.ConfigFile,
+			m.appCfg.DefaultAWSProfile,
+			m.appCfg.DefaultAWSRegion,
+		))
 		return m, nil
 
 	case list.OpenCopyMsg:
@@ -456,6 +469,28 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.checkCredsCmd(), m.fetchAllCmd(), m.clearStatusAfter(3*time.Second))
 
 	case deletepipeline.CancelledMsg:
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		return m, nil
+
+	case settings.SavedMsg:
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		m.appCfg.RefreshInterval = msg.RefreshInterval
+		m.appCfg.DefaultAWSProfile = msg.DefaultAWSProfile
+		m.appCfg.DefaultAWSRegion = msg.DefaultAWSRegion
+		m.refreshInterval, _ = time.ParseDuration(msg.RefreshInterval)
+		m.tickGeneration++
+		m.statusMsg = "Configuration saved"
+		return m, tea.Batch(
+			saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg),
+			m.tickCmd(),
+			m.clearStatusAfter(3*time.Second),
+		)
+
+	case settings.CancelledMsg:
 		if len(m.stack) > 1 {
 			m.stack = m.stack[:len(m.stack)-1]
 		}
@@ -577,7 +612,7 @@ func (m *RootModel) View() string {
 
 	// Two-line footer: line1 = primary actions, line2 = secondary actions + status
 	footerLine1 := "  ↑↓/PgUp/PgDn/Home/End: navigate  enter: detail  o: browser  /: search  space: pause  r: refresh  " + triggerHint + "  q: quit"
-	footerLine2 := "  f: focus  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  c: copy  d: delete  A: automations"
+	footerLine2 := "  f: focus  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  c: copy  d: delete  s: config  A: automations"
 	if len(m.stack) == 1 {
 		if listView, ok := m.stack[0].(list.Model); ok {
 			if position, total := listView.Position(); total > 0 {
@@ -856,8 +891,10 @@ func (m *RootModel) clearStatusAfter(d time.Duration) tea.Cmd {
 }
 
 func (m *RootModel) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(t time.Time) tea.Msg {
-		return tickMsg(t)
+	interval := m.refreshInterval
+	generation := m.tickGeneration
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return tickMsg{generation: generation}
 	})
 }
 
