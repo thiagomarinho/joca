@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 )
@@ -53,6 +55,42 @@ func TestRender_showsExplicitSelectionMarker(t *testing.T) {
 	item := PipelineItem{Entry: config.PipelineEntry{Name: "selected", Provider: config.ProviderGitHub}}
 	if rendered := item.Render(true, 20); !strings.Contains(rendered, "▶") {
 		t.Errorf("selected row missing marker: %q", rendered)
+	}
+}
+
+func TestRender_selectedPausedPipelineShowsBothMarkers(t *testing.T) {
+	item := PipelineItem{
+		Entry:  config.PipelineEntry{Name: "selected-paused", Provider: config.ProviderGitHub},
+		Paused: true,
+	}
+	rendered := item.Render(true, 20)
+	if !strings.Contains(rendered, "▶ ⏸") {
+		t.Errorf("selected paused row missing independent markers: %q", rendered)
+	}
+}
+
+func TestRenderAutomationHintsShowsPipelineFlow(t *testing.T) {
+	tests := []struct {
+		name  string
+		hints AutomationHints
+		want  string
+	}{
+		{name: "target", hints: AutomationHints{Target: true}, want: "→⬡ "},
+		{name: "watched", hints: AutomationHints{Watched: true}, want: " ⬡→"},
+		{name: "target and watched", hints: AutomationHints{Target: true, Watched: true}, want: "→⬡→"},
+		{name: "none", hints: AutomationHints{}, want: "   "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := renderAutomationHints(tt.hints)
+			if lipgloss.Width(got) != 3 {
+				t.Fatalf("automation hint width = %d, want 3: %q", lipgloss.Width(got), got)
+			}
+			if got != tt.want {
+				t.Errorf("automation hint = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

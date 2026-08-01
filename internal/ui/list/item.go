@@ -40,8 +40,10 @@ func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 	marker := " "
 	if highlighted {
 		marker = styles.MarkerSelected.Render("▶")
-	} else if p.Paused {
-		marker = styles.DotOther.Render("⏸")
+	}
+	pauseMarker := " "
+	if p.Paused {
+		pauseMarker = styles.DotOther.Render("⏸")
 	}
 	name := styles.PipelineName.Width(nameWidth).Render(truncate(p.Entry.Name, nameWidth))
 	badge := renderBadge(p.Entry.Provider)
@@ -57,7 +59,7 @@ func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 		status += strings.Repeat(" ", pad)
 	}
 
-	line := fmt.Sprintf("%s %s %s %s  %s  %s %s", marker, automation, name, badge, branchRef, status, dots)
+	line := fmt.Sprintf("%s %s %s %s %s  %s  %s %s", marker, pauseMarker, automation, name, badge, branchRef, status, dots)
 	switch {
 	case highlighted && p.Paused:
 		return styles.SelectedRow.Render(styles.PausedRow.Render(line))
@@ -182,26 +184,36 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-// renderAutomationHints returns a fixed 4-visible-char column for the list
-// row, positioned to the left of the name. Active rules render in colour;
-// exhausted/disabled rules render dimmed so they remain visible.
+// renderAutomationHints returns a fixed 3-visible-char flow column for the
+// list row. An incoming arrow marks a trigger target and an outgoing arrow
+// marks a watched pipeline. Active rules render in colour; exhausted/disabled
+// rules render dimmed so they remain visible.
 func renderAutomationHints(h AutomationHints) string {
-	var watch, target string
-	switch {
-	case h.Watched:
-		watch = styles.AutomationWatch.Render("⬡→")
-	case h.WatchedDisabled:
-		watch = styles.AutomationWatchDim.Render("⬡→")
-	default:
-		watch = "  "
+	hasTarget := h.Target || h.TargetDisabled
+	hasWatch := h.Watched || h.WatchedDisabled
+	targetStyle := styles.AutomationTargetDim
+	if h.Target {
+		targetStyle = styles.AutomationTarget
 	}
-	switch {
-	case h.Target:
-		target = styles.AutomationTarget.Render("→⬡")
-	case h.TargetDisabled:
-		target = styles.AutomationTargetDim.Render("→⬡")
-	default:
-		target = "  "
+	watchStyle := styles.AutomationWatchDim
+	if h.Watched {
+		watchStyle = styles.AutomationWatch
 	}
-	return watch + target
+
+	var sb strings.Builder
+	switch {
+	case hasTarget:
+		sb.WriteString(targetStyle.Render("→⬡"))
+	case hasWatch:
+		sb.WriteByte(' ')
+		sb.WriteString(watchStyle.Render("⬡"))
+	default:
+		sb.WriteString("  ")
+	}
+	if hasWatch {
+		sb.WriteString(watchStyle.Render("→"))
+	} else {
+		sb.WriteByte(' ')
+	}
+	return sb.String()
 }
