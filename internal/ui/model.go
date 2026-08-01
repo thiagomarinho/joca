@@ -32,6 +32,11 @@ type tickMsg time.Time
 type uiTickMsg time.Time
 type clearStatusMsg struct{}
 
+type ssoLoginDoneMsg struct {
+	profile string
+	err     error
+}
+
 type credCheckDoneMsg struct {
 	gh  credstatus.Status
 	aws map[string]credstatus.Status
@@ -203,6 +208,17 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stack = append(m.stack, uitelemetry.New(m.recorder))
 				return m, nil
 			}
+		case "l":
+			if len(m.stack) == 1 {
+				if profile, ok := m.expiredSSOProfile(); ok {
+					if profile == "" {
+						m.statusMsg = "Opening AWS SSO login…"
+					} else {
+						m.statusMsg = fmt.Sprintf("Opening AWS SSO login for profile %q…", profile)
+					}
+					return m, awsSSOLoginCmd(profile)
+				}
+			}
 		}
 		return m, m.forwardToActive(msg)
 
@@ -210,6 +226,15 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ghCred = msg.gh
 		m.awsCreds = msg.aws
 		return m, nil
+
+	case ssoLoginDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("AWS SSO login failed: %v", msg.err)
+			return m, m.clearStatusAfter(4 * time.Second)
+		}
+		m.awsCreds[msg.profile] = credstatus.Status{Pending: true}
+		m.statusMsg = "AWS SSO credentials refreshed ✓"
+		return m, tea.Batch(m.checkCredsCmd(), m.fetchAllCmd(), m.clearStatusAfter(3*time.Second))
 
 	case clearStatusMsg:
 		m.statusMsg = ""
@@ -482,6 +507,9 @@ func (m *RootModel) View() string {
 	// Two-line footer: line1 = primary actions, line2 = secondary actions + status
 	footerLine1 := "  ↑↓: navigate  enter: detail  o: browser  /: search  space: pause  r: refresh  " + triggerHint + "  q: quit"
 	footerLine2 := "  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  A: automations"
+	if _, ok := m.expiredSSOProfile(); ok {
+		footerLine2 += "  l: SSO login"
+	}
 	if m.recorder.IsEnabled() {
 		footerLine2 += "  t: tracking ✓  T: telemetry"
 	} else {
@@ -692,6 +720,39 @@ func (m *RootModel) missingAWSProfiles() []string {
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+// expiredSSOProfile returns the AWS profile for the selected pipeline when its
+// cached SSO credentials need to be refreshed.
+func (m *RootModel) expiredSSOProfile() (string, bool) {
+	if len(m.stack) != 1 {
+		return "", false
+	}
+	listView, ok := m.stack[0].(list.Model)
+	if !ok {
+		return "", false
+	}
+	item, ok := listView.Selected()
+	if !ok || item.Entry.Provider != config.ProviderAWS {
+		return "", false
+	}
+	profile := item.Entry.AWSProfile
+	status, ok := m.awsCreds[profile]
+	return profile, ok && provider.IsSSOError(status.Err)
+}
+
+func awsSSOLoginCommand(profile string) *exec.Cmd {
+	args := []string{"sso", "login"}
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	return exec.Command("aws", args...)
+}
+
+func awsSSOLoginCmd(profile string) tea.Cmd {
+	return tea.ExecProcess(awsSSOLoginCommand(profile), func(err error) tea.Msg {
+		return ssoLoginDoneMsg{profile: profile, err: err}
+	})
 }
 
 // forwardToActive sends msg to the active view and replaces it in the stack.
