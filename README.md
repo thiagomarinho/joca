@@ -72,6 +72,7 @@ choose a suggestion and `→` to complete it.
 | `End` / `G` | Jump to the last pipeline |
 | `Enter` | Open pipeline detail / run logs |
 | `o` | Open in browser |
+| `l` (detail) | Download and open logs for the selected run |
 | `Space` | Pause / resume auto-refresh for pipeline |
 | `f` | Focus selected pipeline: resume it, pause all others, and hide paused pipelines |
 | `r` | Refresh all now |
@@ -83,6 +84,16 @@ choose a suggestion and `→` to complete it.
 | `d` | Delete the selected pipeline after confirmation |
 | `s` | Open application configuration |
 | `q` / `Ctrl+C` | Quit |
+
+For AWS CodePipeline executions, log viewing currently supports CodeBuild
+actions backed by CloudWatch Logs. If an execution contains multiple CodeBuild
+actions, select the stage/action whose logs you want. Logs are written with
+private permissions to a temporary `joca-logs-*` directory and opened with
+`$PAGER`, `bat`, or `less`; the built-in viewer is used when none is available.
+
+The AWS identity used by the pipeline profile needs these additional actions:
+`codepipeline:ListActionExecutions`, `codebuild:BatchGetBuilds`, and
+`logs:GetLogEvents`.
 
 ---
 

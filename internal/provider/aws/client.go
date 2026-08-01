@@ -6,6 +6,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	"github.com/aws/aws-sdk-go-v2/service/codebuild"
 	"github.com/aws/aws-sdk-go-v2/service/codepipeline"
 	"github.com/aws/aws-sdk-go-v2/service/codepipeline/types"
 
@@ -17,6 +19,9 @@ type Client struct {
 	pipelineName string
 	region       string
 	cp           *codepipeline.Client
+	actions      actionExecutionsAPI
+	builds       codeBuildAPI
+	logs         cloudWatchLogsAPI
 }
 
 // New creates an AWS CodePipeline client using the SDK default credential chain.
@@ -33,16 +38,20 @@ func New(ctx context.Context, pipelineName, region, profile string) (*Client, er
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
+	cp := codepipeline.NewFromConfig(cfg)
 	return &Client{
 		pipelineName: pipelineName,
 		region:       region,
-		cp:           codepipeline.NewFromConfig(cfg),
+		cp:           cp,
+		actions:      cp,
+		builds:       codebuild.NewFromConfig(cfg),
+		logs:         cloudwatchlogs.NewFromConfig(cfg),
 	}, nil
 }
 
 // NewWithSDKClient creates a client with an explicit SDK client (useful in tests).
 func NewWithSDKClient(pipelineName, region string, cp *codepipeline.Client) *Client {
-	return &Client{pipelineName: pipelineName, region: region, cp: cp}
+	return &Client{pipelineName: pipelineName, region: region, cp: cp, actions: cp}
 }
 
 func (c *Client) URL() string {
@@ -78,13 +87,13 @@ func (c *Client) CurrentStatus(ctx context.Context) (provider.Run, error) {
 	if status == provider.StatusApproval {
 		stage = stageAfterApproval(out.StageStates)
 	}
-	return provider.Run{
+	return c.withLogSources(provider.Run{
 		ID:        execID,
 		Status:    status,
 		Stage:     stage,
 		StartedAt: aws.ToTime(out.Updated),
 		URL:       url,
-	}, nil
+	}), nil
 }
 
 func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) {
@@ -103,14 +112,14 @@ func (c *Client) RecentRuns(ctx context.Context, n int) ([]provider.Run, error) 
 		if len(s.SourceRevisions) > 0 {
 			commit = shortSHA(aws.ToString(s.SourceRevisions[0].RevisionId))
 		}
-		runs = append(runs, provider.Run{
+		runs = append(runs, c.withLogSources(provider.Run{
 			ID:        execID,
 			Branch:    branch,
 			Commit:    commit,
 			Status:    mapAWSStatus(s.Status),
 			StartedAt: aws.ToTime(s.StartTime),
 			URL:       c.executionURL(execID),
-		})
+		}))
 	}
 	return runs, nil
 }

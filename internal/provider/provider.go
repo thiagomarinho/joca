@@ -31,6 +31,19 @@ type Run struct {
 	URL       string
 	// Logs is a lazy loader for log output. May be nil if not supported.
 	Logs func(ctx context.Context) (string, error)
+	// LogSources lazily discovers independently viewable logs for this run.
+	// It is used by providers such as AWS CodePipeline where one execution can
+	// contain multiple build actions.
+	LogSources func(ctx context.Context) ([]LogSource, error)
+}
+
+// LogSource identifies one independently viewable log within a pipeline run.
+type LogSource struct {
+	Stage   string
+	Action  string
+	Project string
+	Status  Status
+	Logs    func(ctx context.Context) (string, error)
 }
 
 // IsSSOError reports whether err is likely caused by an expired or missing SSO
