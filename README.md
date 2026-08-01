@@ -53,6 +53,10 @@ joca add github owner/repo           # adds a GitHub Actions pipeline
 joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 ```
 
+When adding an AWS pipeline in the TUI, joca suggests profiles and regions
+from the standard AWS shared config and credentials files. Use `↑`/`↓` to
+choose a suggestion and `→` to complete it.
+
 ---
 
 ## TUI Keybindings

@@ -36,7 +36,7 @@ func CheckGitHub() Status {
 // The SDK is used to verify credentials actually resolve; the source description is
 // derived from the environment so we don't depend on SDK-internal provider name strings.
 func CheckAWS(profile string) Status {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	opts := []func(*awsconfig.LoadOptions) error{}

@@ -2,6 +2,7 @@ package addwizard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -78,10 +79,12 @@ type Model struct {
 	wfSelected map[int]bool
 
 	// aws credential inputs (stepAWSCredentials)
-	awsRegion    string
-	awsProfile   string
-	awsCredField int  // 0=region, 1=profile
-	awsChecking  bool // true while credential check is in-flight
+	awsRegion     string
+	awsProfile    string
+	awsCredField  int  // 0=profile, 1=region
+	awsChecking   bool // true while credential check is in-flight
+	awsProfiles   []awsProfileSuggestion
+	awsSuggestion int
 
 	// aws pipeline browser
 	awsPipelines []string
@@ -96,8 +99,9 @@ type Model struct {
 // New creates a fresh wizard model.
 func New(configFile string) Model {
 	return Model{
-		configFile: configFile,
-		wfSelected: make(map[int]bool),
+		configFile:  configFile,
+		wfSelected:  make(map[int]bool),
+		awsProfiles: discoverAWSProfiles(),
 	}
 }
 
@@ -132,6 +136,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case provider.IsSSOError(msg.status.Err):
 				m.err = fmt.Sprintf("SSO token expired — run `aws sso login --profile %s`", m.awsProfile)
+			case errors.Is(msg.status.Err, context.DeadlineExceeded):
+				if m.awsProfile != "" {
+					m.err = fmt.Sprintf("credential check timed out for profile %q — verify its credential provider and network access", m.awsProfile)
+				} else {
+					m.err = "credential check timed out — verify the default credential chain and network access"
+				}
 			case m.awsProfile != "":
 				m.err = fmt.Sprintf("no credentials found for profile %q: %v", m.awsProfile, msg.status.Err)
 			default:
@@ -207,17 +217,35 @@ func (m Model) updateAWSCredentials(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.step = stepProvider
 		m.err = ""
-	case "tab", "down":
+	case "tab":
 		m.awsCredField = 1 - m.awsCredField
+		m.awsSuggestion = 0
 	case "up":
-		m.awsCredField = 1 - m.awsCredField
-	case "backspace":
-		if m.awsCredField == 0 && len(m.awsRegion) > 0 {
-			m.awsRegion = m.awsRegion[:len(m.awsRegion)-1]
-		} else if m.awsCredField == 1 && len(m.awsProfile) > 0 {
-			m.awsProfile = m.awsProfile[:len(m.awsProfile)-1]
+		suggestions := m.awsCredentialSuggestions()
+		if len(suggestions) > 0 {
+			m.awsSuggestion = (m.awsSuggestion - 1 + len(suggestions)) % len(suggestions)
 		}
+	case "down":
+		suggestions := m.awsCredentialSuggestions()
+		if len(suggestions) > 0 {
+			m.awsSuggestion = (m.awsSuggestion + 1) % len(suggestions)
+		}
+	case "right":
+		m = m.applyAWSSuggestion()
+	case "backspace":
+		if m.awsCredField == 0 && len(m.awsProfile) > 0 {
+			runes := []rune(m.awsProfile)
+			m.awsProfile = string(runes[:len(runes)-1])
+		} else if m.awsCredField == 1 && len(m.awsRegion) > 0 {
+			runes := []rune(m.awsRegion)
+			m.awsRegion = string(runes[:len(runes)-1])
+		}
+		m.awsSuggestion = 0
 	case "enter":
+		if m.hasUnappliedAWSSuggestion() {
+			m = m.applyAWSSuggestion()
+			return m, nil
+		}
 		m.awsChecking = true
 		m.err = ""
 		profile := m.awsProfile
@@ -227,10 +255,11 @@ func (m Model) updateAWSCredentials(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if msg.Type == tea.KeyRunes {
 			if m.awsCredField == 0 {
-				m.awsRegion += string(msg.Runes)
-			} else {
 				m.awsProfile += string(msg.Runes)
+			} else {
+				m.awsRegion += string(msg.Runes)
 			}
+			m.awsSuggestion = 0
 		}
 	}
 	return m, nil
@@ -510,8 +539,8 @@ func (m Model) viewAWSCredentials() string {
 	sb.WriteString("\n\n")
 
 	fields := []struct{ label, value string }{
-		{"Region: ", m.awsRegion},
 		{"Profile:", m.awsProfile},
+		{"Region: ", m.awsRegion},
 	}
 	for i, f := range fields {
 		active := i == m.awsCredField
@@ -526,13 +555,42 @@ func (m Model) viewAWSCredentials() string {
 	}
 	sb.WriteString("  " + styles.Footer.Render("  (both optional)") + "\n")
 
+	suggestions := m.awsCredentialSuggestions()
+	if len(suggestions) > 0 {
+		sb.WriteString("\n  " + styles.Footer.Render("Suggestions") + "\n")
+		start := 0
+		if m.awsSuggestion >= 6 {
+			start = m.awsSuggestion - 5
+		}
+		end := start + 6
+		if end > len(suggestions) {
+			end = len(suggestions)
+		}
+		for i := start; i < end; i++ {
+			suggestion := suggestions[i]
+			marker := "  "
+			if i == m.awsSuggestion {
+				marker = styles.FormCursor.Render("> ")
+			}
+			line := suggestion.value
+			if suggestion.detail != "" {
+				line += "  " + styles.Footer.Render(suggestion.detail)
+			}
+			sb.WriteString("  " + marker + line + "\n")
+		}
+	}
+
 	sb.WriteString("\n")
 	if m.awsChecking {
 		sb.WriteString("  " + styles.Footer.Render("Checking credentials…") + "\n\n")
 	} else if m.err != "" {
 		sb.WriteString("  " + styles.FormError.Render("✗ "+m.err) + "\n\n")
 	}
-	sb.WriteString("  " + styles.Footer.Render("tab/↑↓: switch field  enter: continue  esc: back"))
+	enterHint := "enter: continue"
+	if m.hasUnappliedAWSSuggestion() {
+		enterHint = "enter/→: complete"
+	}
+	sb.WriteString("  " + styles.Footer.Render("tab: switch field  ↑↓: choose  "+enterHint+"  esc: back"))
 	return sb.String()
 }
 
