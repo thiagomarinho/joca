@@ -249,8 +249,10 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.paused[idx] = !m.paused[idx]
 		m.appCfg.Pipelines[idx].Paused = m.paused[idx]
 		if listView, ok := m.stack[0].(list.Model); ok {
-			listView.Items[idx].Paused = m.paused[idx]
-			m.stack[0] = listView
+			item := listView.Items[idx]
+			item.Paused = m.paused[idx]
+			updated, _ := listView.Update(list.FetchedMsg{Index: idx, Item: item})
+			m.stack[0] = updated
 		}
 		if m.globalPaused && !m.paused[idx] {
 			m.globalPaused = false
