@@ -1,6 +1,7 @@
 package list
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -482,5 +483,89 @@ func TestSearch_resetsCursorOnEachChar(t *testing.T) {
 	m = updated.(Model)
 	if m.cursor != 0 {
 		t.Errorf("expected cursor reset to 0 after typing, got %d", m.cursor)
+	}
+}
+
+func TestViewportKeepsCursorVisibleAtTopAndBottom(t *testing.T) {
+	m := makeTestModel(
+		"pipeline-0", "pipeline-1", "pipeline-2", "pipeline-3", "pipeline-4",
+		"pipeline-5", "pipeline-6", "pipeline-7", "pipeline-8", "pipeline-9",
+	)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 13})
+	m = updated.(Model)
+
+	m = sendKey(m, "end")
+	view := m.View()
+	if !strings.Contains(view, "pipeline-9") || strings.Contains(view, "pipeline-0") {
+		t.Errorf("viewport did not scroll to bottom:\n%s", view)
+	}
+	if item, ok := m.Selected(); !ok || item.Entry.Name != "pipeline-9" {
+		t.Fatalf("selected item at bottom = %#v, %v", item, ok)
+	}
+
+	m = sendKey(m, "home")
+	view = m.View()
+	if !strings.Contains(view, "pipeline-0") || strings.Contains(view, "pipeline-9") {
+		t.Errorf("viewport did not return to top:\n%s", view)
+	}
+}
+
+func TestPageNavigationMovesByVisiblePage(t *testing.T) {
+	m := makeTestModel("0", "1", "2", "3", "4", "5", "6")
+	updated, _ := m.Update(tea.WindowSizeMsg{Height: 13}) // three pipeline rows
+	m = updated.(Model)
+
+	m = sendKey(m, "pgdown")
+	if m.cursor != 3 {
+		t.Errorf("cursor after page down = %d, want 3", m.cursor)
+	}
+	m = sendKey(m, "pgup")
+	if m.cursor != 0 {
+		t.Errorf("cursor after page up = %d, want 0", m.cursor)
+	}
+}
+
+func TestPositionUsesFilteredList(t *testing.T) {
+	m := makeTestModel("alpha", "beta", "gamma", "delta")
+	m = typeSearch(m, "ta")
+	m = sendKey(m, "down")
+
+	position, total := m.Position()
+	if position != 2 || total != 2 {
+		t.Errorf("position = %d/%d, want 2/2", position, total)
+	}
+}
+
+func TestFocusMessageAndStateUseSelectedPipeline(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"paused", true},
+		struct {
+			name   string
+			paused bool
+		}{"active", false},
+	)
+
+	_, cmd := m.Update(keyMsgFromString("f"))
+	msg, ok := cmd().(FocusMsg)
+	if !ok || msg.Index != 0 {
+		t.Fatalf("focus message = %#v, %v", msg, ok)
+	}
+
+	m = m.SetFocused(msg.Index)
+	if !m.HidePaused {
+		t.Error("expected focus to hide paused pipelines")
+	}
+	if m.Items[0].Paused || !m.Items[1].Paused {
+		t.Errorf("focus pause states = [%v %v]", m.Items[0].Paused, m.Items[1].Paused)
+	}
+	item, ok := m.Selected()
+	if !ok || item.Entry.Name != "paused" {
+		t.Fatalf("focused selection = %#v, %v", item, ok)
+	}
+	if visible := m.visibleIdx(); len(visible) != 1 || visible[0] != msg.Index {
+		t.Errorf("visible indexes after focus = %v, want [%d]", visible, msg.Index)
 	}
 }

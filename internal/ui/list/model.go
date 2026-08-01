@@ -37,6 +37,9 @@ type OpenBrowserMsg struct{ URL string }
 // TogglePauseMsg asks the root model to pause/resume refreshing a pipeline.
 type TogglePauseMsg struct{ Index int }
 
+// FocusMsg asks the root model to resume one pipeline and pause all others.
+type FocusMsg struct{ Index int }
+
 // TriggerMsg asks the root model to re-run the selected pipeline's latest execution.
 type TriggerMsg struct{ Index int }
 
@@ -48,13 +51,14 @@ type MoveItemMsg struct{ From, To int }
 
 // Model is the pipeline list view.
 type Model struct {
-	Items      []PipelineItem
-	cursor     int
-	height     int
-	width      int
-	HidePaused bool   // when true, paused pipelines are not rendered
-	searching  bool   // true while the search prompt is open
-	query      string // current fuzzy-filter query
+	Items         []PipelineItem
+	cursor        int
+	height        int
+	width         int
+	viewportStart int
+	HidePaused    bool   // when true, paused pipelines are not rendered
+	searching     bool   // true while the search prompt is open
+	query         string // current fuzzy-filter query
 }
 
 // IsSearching reports whether the search prompt is currently open.
@@ -74,6 +78,45 @@ func (m Model) visibleIdx() []int {
 		idx = append(idx, i)
 	}
 	return idx
+}
+
+func (m Model) pageRows() int {
+	if m.height <= 0 {
+		return len(m.Items)
+	}
+	rows := m.height - 10
+	if m.query != "" || m.searching {
+		rows -= 2
+	}
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+func (m *Model) ensureCursorVisible() {
+	visible := len(m.visibleIdx())
+	if visible == 0 {
+		m.cursor = 0
+		m.viewportStart = 0
+		return
+	}
+	if m.cursor >= visible {
+		m.cursor = visible - 1
+	}
+	rows := m.pageRows()
+	if m.cursor < m.viewportStart {
+		m.viewportStart = m.cursor
+	} else if m.cursor >= m.viewportStart+rows {
+		m.viewportStart = m.cursor - rows + 1
+	}
+	maxStart := visible - rows
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if m.viewportStart > maxStart {
+		m.viewportStart = maxStart
+	}
 }
 
 // fuzzyMatch reports whether all runes in query appear as a subsequence
@@ -133,6 +176,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(vi) > 0 && m.cursor >= len(vi) {
 				m.cursor = len(vi) - 1
 			}
+			m.ensureCursorVisible()
 			return m, nil
 		}
 
@@ -152,6 +196,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(vi)-1 {
 				m.cursor++
+			}
+		case "home", "g":
+			m.cursor = 0
+		case "end", "G":
+			if len(vi) > 0 {
+				m.cursor = len(vi) - 1
+			}
+		case "pgup", "ctrl+u":
+			m.cursor -= m.pageRows()
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+		case "pgdown", "ctrl+d":
+			m.cursor += m.pageRows()
+			if len(vi) > 0 && m.cursor >= len(vi) {
+				m.cursor = len(vi) - 1
 			}
 		case "h":
 			m.HidePaused = !m.HidePaused
@@ -194,6 +254,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				idx := vi[m.cursor]
 				return m, func() tea.Msg { return TogglePauseMsg{Index: idx} }
 			}
+		case "f":
+			if len(vi) > 0 {
+				idx := vi[m.cursor]
+				return m, func() tea.Msg { return FocusMsg{Index: idx} }
+			}
 		case "R":
 			if len(vi) > 0 {
 				idx := vi[m.cursor]
@@ -209,6 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				realCur, realPrev := vi[m.cursor], vi[m.cursor-1]
 				m.Items[realCur], m.Items[realPrev] = m.Items[realPrev], m.Items[realCur]
 				m.cursor--
+				m.ensureCursorVisible()
 				from, to := realCur, realPrev
 				return m, func() tea.Msg { return MoveItemMsg{From: from, To: to} }
 			}
@@ -217,22 +283,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				realCur, realNext := vi[m.cursor], vi[m.cursor+1]
 				m.Items[realCur], m.Items[realNext] = m.Items[realNext], m.Items[realCur]
 				m.cursor++
+				m.ensureCursorVisible()
 				from, to := realCur, realNext
 				return m, func() tea.Msg { return MoveItemMsg{From: from, To: to} }
 			}
 		}
+		m.ensureCursorVisible()
 
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.width = msg.Width
+		m.ensureCursorVisible()
 
 	case FetchedMsg:
 		if msg.Index >= 0 && msg.Index < len(m.Items) {
 			m.Items[msg.Index] = msg.Item
 			// A pipeline may have become paused/unpaused; re-clamp cursor.
-			if vi := m.visibleIdx(); m.cursor >= len(vi) && len(vi) > 0 {
-				m.cursor = len(vi) - 1
-			}
+			m.ensureCursorVisible()
 		}
 	}
 	return m, nil
@@ -256,6 +323,12 @@ func (m Model) View() string {
 		sb.WriteString(m.searchBarView())
 		return sb.String()
 	}
+	m.ensureCursorVisible()
+	start := m.viewportStart
+	end := start + m.pageRows()
+	if end > len(vi) {
+		end = len(vi)
+	}
 
 	// Fixed overhead per row (excluding name column):
 	// 2 (indent) + 1 (marker) + 1 (space) + 4 (hints) + 1 (space) + nameWidth +
@@ -268,10 +341,17 @@ func (m Model) View() string {
 	}
 
 	var sb strings.Builder
-	for visPos, realIdx := range vi {
+	if start > 0 {
+		fmt.Fprintf(&sb, "  %s\n", styles.Footer.Render(fmt.Sprintf("↑ %d more", start)))
+	}
+	for visPos := start; visPos < end; visPos++ {
+		realIdx := vi[visPos]
 		sb.WriteString("  ")
 		sb.WriteString(m.Items[realIdx].Render(visPos == m.cursor, nameWidth))
 		sb.WriteByte('\n')
+	}
+	if end < len(vi) {
+		fmt.Fprintf(&sb, "  %s\n", styles.Footer.Render(fmt.Sprintf("↓ %d more", len(vi)-end)))
 	}
 	sb.WriteString(m.searchBarView())
 	return sb.String()
@@ -295,5 +375,37 @@ func (m Model) Selected() (PipelineItem, bool) {
 	if len(vi) == 0 {
 		return PipelineItem{}, false
 	}
+	if m.cursor < 0 || m.cursor >= len(vi) {
+		return PipelineItem{}, false
+	}
 	return m.Items[vi[m.cursor]], true
+}
+
+// Position returns the one-based cursor position and total visible pipelines.
+func (m Model) Position() (int, int) {
+	total := len(m.visibleIdx())
+	if total == 0 || m.cursor < 0 || m.cursor >= total {
+		return 0, total
+	}
+	return m.cursor + 1, total
+}
+
+// SetFocused pauses every pipeline except selectedIndex and keeps the focused
+// pipeline selected, even when paused pipelines are hidden.
+func (m Model) SetFocused(selectedIndex int) Model {
+	for i := range m.Items {
+		paused := i != selectedIndex
+		m.Items[i].Paused = paused
+		m.Items[i].Entry.Paused = paused
+	}
+	m.HidePaused = true
+	visible := m.visibleIdx()
+	for position, index := range visible {
+		if index == selectedIndex {
+			m.cursor = position
+			break
+		}
+	}
+	m.ensureCursorVisible()
+	return m
 }

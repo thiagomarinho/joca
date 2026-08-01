@@ -299,6 +299,30 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
 
+	case list.FocusMsg:
+		idx := msg.Index
+		if idx < 0 || idx >= len(m.appCfg.Pipelines) {
+			return m, nil
+		}
+		m.paused = make(map[int]bool, len(m.appCfg.Pipelines)-1)
+		for i := range m.appCfg.Pipelines {
+			paused := i != idx
+			m.appCfg.Pipelines[i].Paused = paused
+			if paused {
+				m.paused[i] = true
+			}
+		}
+		if listView, ok := m.stack[0].(list.Model); ok {
+			m.stack[0] = listView.SetFocused(idx)
+		}
+		m.globalPaused = false
+		m.statusMsg = fmt.Sprintf("Focused %q — other pipelines paused", m.appCfg.Pipelines[idx].Name)
+		return m, tea.Batch(
+			saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg),
+			m.fetchOneCmd(idx),
+			m.clearStatusAfter(3*time.Second),
+		)
+
 	case list.MoveItemMsg:
 		from, to := msg.From, msg.To
 		m.appCfg.Pipelines[from], m.appCfg.Pipelines[to] = m.appCfg.Pipelines[to], m.appCfg.Pipelines[from]
@@ -447,7 +471,9 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, p := range m.appCfg.Pipelines {
 			names[i] = p.Name
 		}
-		m.stack = append(m.stack, addautomation.New(names, m.appCfg.Automations, m.appCfg.AllowChains()))
+		wizard := addautomation.New(names, m.appCfg.Automations, m.appCfg.AllowChains())
+		updated, _ := wizard.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		m.stack = append(m.stack, updated)
 		return m, nil
 
 	case addautomation.SavedMsg:
@@ -550,8 +576,15 @@ func (m *RootModel) View() string {
 	}
 
 	// Two-line footer: line1 = primary actions, line2 = secondary actions + status
-	footerLine1 := "  ↑↓: navigate  enter: detail  o: browser  /: search  space: pause  r: refresh  " + triggerHint + "  q: quit"
-	footerLine2 := "  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  c: copy  d: delete  A: automations"
+	footerLine1 := "  ↑↓/PgUp/PgDn/Home/End: navigate  enter: detail  o: browser  /: search  space: pause  r: refresh  " + triggerHint + "  q: quit"
+	footerLine2 := "  f: focus  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  c: copy  d: delete  A: automations"
+	if len(m.stack) == 1 {
+		if listView, ok := m.stack[0].(list.Model); ok {
+			if position, total := listView.Position(); total > 0 {
+				footerLine2 += fmt.Sprintf("  [%d/%d]", position, total)
+			}
+		}
+	}
 	if _, ok := m.expiredSSOProfile(); ok {
 		footerLine2 += "  l: SSO login"
 	}

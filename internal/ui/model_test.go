@@ -43,6 +43,39 @@ func TestTogglePauseWhilePausedPipelinesHiddenClampsCursor(t *testing.T) {
 	}
 }
 
+func TestFocusResumesSelectedPipelineAndPausesOthers(t *testing.T) {
+	appCfg := &config.AppConfig{
+		Pipelines: []config.PipelineEntry{
+			{Name: "first", Paused: false},
+			{Name: "second", Paused: true},
+			{Name: "third", Paused: false},
+		},
+	}
+	m := New(appCfg, config.Config{ConfigFile: filepath.Join(t.TempDir(), "config.yaml")})
+
+	_, cmd := m.Update(list.FocusMsg{Index: 1})
+	if cmd == nil {
+		t.Fatal("expected focus persistence and refresh commands")
+	}
+	for i, pipeline := range m.appCfg.Pipelines {
+		wantPaused := i != 1
+		if pipeline.Paused != wantPaused {
+			t.Errorf("pipeline %d paused = %v, want %v", i, pipeline.Paused, wantPaused)
+		}
+	}
+	if m.globalPaused {
+		t.Error("focused state must not be globally paused")
+	}
+	listView := m.stack[0].(list.Model)
+	if !listView.HidePaused {
+		t.Error("expected focus to enable hide-paused mode")
+	}
+	item, ok := listView.Selected()
+	if !ok || item.Entry.Name != "second" {
+		t.Fatalf("focused list selection = %#v, %v", item, ok)
+	}
+}
+
 func TestAWSLoginCommandUsesSelectedProfile(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -35,6 +35,8 @@ type Model struct {
 	allowChains   bool     // mirrors AppConfig.AutomationAllowChains
 	existingRules []config.AutomationRule
 	step          step
+	height        int
+	viewportStart int
 
 	watchCursor int
 
@@ -73,12 +75,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			if !m.inputingTimes {
 				m.moveCursorUp()
+				m.ensurePipelineCursorVisible()
 			}
 
 		case "down", "j":
 			m.err = ""
 			if !m.inputingTimes {
 				m.moveCursorDown()
+				m.ensurePipelineCursorVisible()
+			}
+
+		case "home", "g":
+			if !m.inputingTimes {
+				m.moveCursorHome()
+				m.ensurePipelineCursorVisible()
+			}
+
+		case "end", "G":
+			if !m.inputingTimes {
+				m.moveCursorEnd()
+				m.ensurePipelineCursorVisible()
+			}
+
+		case "pgup", "ctrl+u":
+			if !m.inputingTimes {
+				m.moveCursorPage(-m.pipelinePageRows())
+				m.ensurePipelineCursorVisible()
+			}
+
+		case "pgdown", "ctrl+d":
+			if !m.inputingTimes {
+				m.moveCursorPage(m.pipelinePageRows())
+				m.ensurePipelineCursorVisible()
 			}
 
 		case " ":
@@ -118,9 +146,98 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		// no-op
+		m.height = msg.Height
+		m.ensurePipelineCursorVisible()
 	}
 	return m, nil
+}
+
+func (m Model) pipelinePageRows() int {
+	if m.height <= 0 {
+		return len(m.pipelines)
+	}
+	rows := m.height - 12
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+func (m *Model) pipelineCursor() (int, bool) {
+	switch m.step {
+	case stepWatchPipeline:
+		return m.watchCursor, true
+	case stepTriggerPipeline:
+		return m.triggerCursor, true
+	default:
+		return 0, false
+	}
+}
+
+func (m *Model) ensurePipelineCursorVisible() {
+	cursor, ok := m.pipelineCursor()
+	if !ok || len(m.pipelines) == 0 {
+		m.viewportStart = 0
+		return
+	}
+	rows := m.pipelinePageRows()
+	if cursor < m.viewportStart {
+		m.viewportStart = cursor
+	} else if cursor >= m.viewportStart+rows {
+		m.viewportStart = cursor - rows + 1
+	}
+	maxStart := len(m.pipelines) - rows
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if m.viewportStart > maxStart {
+		m.viewportStart = maxStart
+	}
+}
+
+func (m *Model) moveCursorHome() {
+	switch m.step {
+	case stepWatchPipeline:
+		m.watchCursor = 0
+	case stepOnStatus:
+		m.statusCursor = 0
+	case stepTriggerPipeline:
+		m.triggerCursor = 0
+	case stepRepeat:
+		m.repeatCursor = 0
+	}
+}
+
+func (m *Model) moveCursorEnd() {
+	switch m.step {
+	case stepWatchPipeline:
+		m.watchCursor = max(0, len(m.pipelines)-1)
+	case stepOnStatus:
+		m.statusCursor = len(availableStatuses) - 1
+	case stepTriggerPipeline:
+		m.triggerCursor = max(0, len(m.pipelines)-1)
+	case stepRepeat:
+		m.repeatCursor = len(repeatOptions) - 1
+	}
+}
+
+func (m *Model) moveCursorPage(delta int) {
+	switch m.step {
+	case stepWatchPipeline:
+		m.watchCursor = clamp(m.watchCursor+delta, 0, max(0, len(m.pipelines)-1))
+	case stepTriggerPipeline:
+		m.triggerCursor = clamp(m.triggerCursor+delta, 0, max(0, len(m.pipelines)-1))
+	}
+}
+
+func clamp(value, low, high int) int {
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
 }
 
 func (m *Model) moveCursorUp() {
@@ -173,9 +290,11 @@ func (m *Model) advance() tea.Cmd {
 			return nil
 		}
 		m.step = stepOnStatus
+		m.viewportStart = 0
 
 	case stepOnStatus:
 		m.step = stepTriggerPipeline
+		m.viewportStart = 0
 
 	case stepTriggerPipeline:
 		if len(m.pipelines) == 0 {
@@ -262,7 +381,7 @@ func (m Model) View() string {
 	switch m.step {
 	case stepWatchPipeline:
 		sb.WriteString("  Which pipeline should be watched?\n\n")
-		sb.WriteString(m.renderList(m.pipelines, m.watchCursor))
+		sb.WriteString(m.renderPipelineList(m.watchCursor, false))
 
 	case stepOnStatus:
 		watch := ""
@@ -308,47 +427,58 @@ func (m Model) View() string {
 	}
 
 	sb.WriteString("\n")
-	if m.step == stepTriggerPipeline {
-		sb.WriteString(styles.Footer.Render("  ↑↓: navigate  space: toggle  enter: confirm  esc: cancel"))
-	} else {
+	switch m.step {
+	case stepTriggerPipeline:
+		sb.WriteString(styles.Footer.Render("  ↑↓/PgUp/PgDn/Home/End: navigate  space: toggle  enter: confirm  esc: cancel"))
+	case stepWatchPipeline:
+		sb.WriteString(styles.Footer.Render("  ↑↓/PgUp/PgDn/Home/End: select  enter: confirm  esc: cancel"))
+	default:
 		sb.WriteString(styles.Footer.Render("  ↑↓: select  enter: confirm  esc: cancel"))
+	}
+	if cursor, ok := m.pipelineCursor(); ok && len(m.pipelines) > 0 {
+		fmt.Fprintf(&sb, "  %s", styles.Footer.Render(fmt.Sprintf("[%d/%d]", cursor+1, len(m.pipelines))))
 	}
 
 	return sb.String()
 }
 
-func (m Model) renderList(items []string, cursor int) string {
-	if len(items) == 0 {
+func (m Model) renderPipelineList(cursor int, checkboxes bool) string {
+	if len(m.pipelines) == 0 {
 		return styles.FormError.Render("  no pipelines configured") + "\n"
 	}
 	var sb strings.Builder
-	for i, item := range items {
+	start := m.viewportStart
+	end := start + m.pipelinePageRows()
+	if end > len(m.pipelines) {
+		end = len(m.pipelines)
+	}
+	if start > 0 {
+		fmt.Fprintf(&sb, "  %s\n", styles.Footer.Render(fmt.Sprintf("↑ %d more", start)))
+	}
+	for i := start; i < end; i++ {
+		item := m.pipelines[i]
 		marker := "  "
 		if i == cursor {
 			marker = styles.MarkerSelected.Render("▶ ")
 		}
-		fmt.Fprintf(&sb, "  %s%s\n", marker, item)
+		if checkboxes {
+			checkbox := "[ ]"
+			if m.triggerSelected[i] {
+				checkbox = styles.CredOK.Render("[x]")
+			}
+			fmt.Fprintf(&sb, "  %s%s %s\n", marker, checkbox, item)
+		} else {
+			fmt.Fprintf(&sb, "  %s%s\n", marker, item)
+		}
+	}
+	if end < len(m.pipelines) {
+		fmt.Fprintf(&sb, "  %s\n", styles.Footer.Render(fmt.Sprintf("↓ %d more", len(m.pipelines)-end)))
 	}
 	return sb.String()
 }
 
 func (m Model) renderTriggerList() string {
-	if len(m.pipelines) == 0 {
-		return styles.FormError.Render("  no pipelines configured") + "\n"
-	}
-	var sb strings.Builder
-	for i, item := range m.pipelines {
-		marker := "  "
-		if i == m.triggerCursor {
-			marker = styles.MarkerSelected.Render("▶ ")
-		}
-		checkbox := "[ ]"
-		if m.triggerSelected[i] {
-			checkbox = styles.CredOK.Render("[x]")
-		}
-		fmt.Fprintf(&sb, "  %s%s %s\n", marker, checkbox, item)
-	}
-	return sb.String()
+	return m.renderPipelineList(m.triggerCursor, true)
 }
 
 func (m Model) renderStatusList() string {

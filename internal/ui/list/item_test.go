@@ -49,6 +49,13 @@ func TestRender_emptyBranchRef(t *testing.T) {
 	}
 }
 
+func TestRender_showsExplicitSelectionMarker(t *testing.T) {
+	item := PipelineItem{Entry: config.PipelineEntry{Name: "selected", Provider: config.ProviderGitHub}}
+	if rendered := item.Render(true, 20); !strings.Contains(rendered, "▶") {
+		t.Errorf("selected row missing marker: %q", rendered)
+	}
+}
+
 func TestRender_runningWithStage(t *testing.T) {
 	item := PipelineItem{
 		Entry:   config.PipelineEntry{Name: "p", Provider: config.ProviderGitHub},

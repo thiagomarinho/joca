@@ -38,7 +38,9 @@ type PipelineItem struct {
 // nameWidth is the visible character width to use for the name column.
 func (p PipelineItem) Render(highlighted bool, nameWidth int) string {
 	marker := " "
-	if p.Paused {
+	if highlighted {
+		marker = styles.MarkerSelected.Render("▶")
+	} else if p.Paused {
 		marker = styles.DotOther.Render("⏸")
 	}
 	name := styles.PipelineName.Width(nameWidth).Render(truncate(p.Entry.Name, nameWidth))

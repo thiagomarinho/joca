@@ -65,9 +65,13 @@ choose a suggestion and `→` to complete it.
 |-----|--------|
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
+| `Page Up` / `Page Down` | Move by one visible page |
+| `Home` / `g` | Jump to the first pipeline |
+| `End` / `G` | Jump to the last pipeline |
 | `Enter` | Open pipeline detail / run logs |
 | `o` | Open in browser |
 | `Space` | Pause / resume auto-refresh for pipeline |
+| `f` | Focus selected pipeline: resume it, pause all others, and hide paused pipelines |
 | `r` | Refresh all now |
 | `R` | Re-run latest execution (GitHub) / start new execution (AWS) |
 | `N` | Start a new run via workflow dispatch (GitHub only) |
