@@ -70,6 +70,7 @@ joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 | `l` | Refresh expired AWS SSO credentials for the selected pipeline |
 | `a` | Add pipeline (inline form) |
 | `c` | Copy the selected pipeline and customize its settings |
+| `d` | Delete the selected pipeline after confirmation |
 | `q` / `Ctrl+C` | Quit |
 
 ---
@@ -93,7 +94,6 @@ joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 
 | Feature | Notes |
 |---------|-------|
-| Delete pipeline (`d`) | Needs config write + inline confirm prompt |
 | Filter pipelines in list | Type-to-search, similar to the add wizard |
 | AWS approval action | Approve / reject from TUI when a pipeline awaits manual approval |
 | Real log content for GitHub | Download and extract the zip from the GitHub log URL |

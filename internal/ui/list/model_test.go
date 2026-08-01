@@ -312,6 +312,32 @@ func TestCopyUsesSelectedVisiblePipeline(t *testing.T) {
 	}
 }
 
+func TestDeleteUsesSelectedVisiblePipeline(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"hidden", true},
+		struct {
+			name   string
+			paused bool
+		}{"visible", false},
+	)
+	m.HidePaused = true
+
+	_, cmd := m.Update(keyMsgFromString("d"))
+	if cmd == nil {
+		t.Fatal("expected delete command")
+	}
+	msg, ok := cmd().(OpenDeleteMsg)
+	if !ok {
+		t.Fatalf("expected OpenDeleteMsg, got %T", cmd())
+	}
+	if msg.Entry.Name != "visible" {
+		t.Errorf("delete entry = %q, want %q", msg.Entry.Name, "visible")
+	}
+}
+
 // --- Fuzzy search tests ---
 
 // typeSearch sends "/" to enter search mode, then types the given query one

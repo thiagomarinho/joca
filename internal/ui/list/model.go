@@ -25,6 +25,9 @@ type OpenAddFormMsg struct{}
 // OpenCopyMsg asks the root model to copy the selected pipeline.
 type OpenCopyMsg struct{ Entry config.PipelineEntry }
 
+// OpenDeleteMsg asks the root model to confirm deletion of the selected pipeline.
+type OpenDeleteMsg struct{ Entry config.PipelineEntry }
+
 // OpenAutomationsMsg asks the root model to push the automation rules view.
 type OpenAutomationsMsg struct{}
 
@@ -178,6 +181,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(vi) > 0 {
 				entry := m.Items[vi[m.cursor]].Entry
 				return m, func() tea.Msg { return OpenCopyMsg{Entry: entry} }
+			}
+		case "d":
+			if len(vi) > 0 {
+				entry := m.Items[vi[m.cursor]].Entry
+				return m, func() tea.Msg { return OpenDeleteMsg{Entry: entry} }
 			}
 		case "A":
 			return m, func() tea.Msg { return OpenAutomationsMsg{} }

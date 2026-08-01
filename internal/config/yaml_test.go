@@ -64,3 +64,52 @@ func TestAddPipeline_duplicateReturnsError(t *testing.T) {
 		t.Error("expected error for duplicate pipeline name, got nil")
 	}
 }
+
+func TestDeletePipelineRemovesPipelineAndReferencingAutomations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := &config.AppConfig{
+		Pipelines: []config.PipelineEntry{
+			{Name: "build", Provider: config.ProviderGitHub},
+			{Name: "deploy", Provider: config.ProviderAWS},
+		},
+		Automations: []config.AutomationRule{
+			{Name: "build then deploy", WatchPipeline: "build", TriggerPipeline: "deploy"},
+			{Name: "deploy then notify", WatchPipeline: "deploy", TriggerPipeline: "notify"},
+			{Name: "unrelated", WatchPipeline: "lint", TriggerPipeline: "notify"},
+		},
+	}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	removedRules, err := config.DeletePipeline(path, "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removedRules != 2 {
+		t.Errorf("removed automation rules = %d, want 2", removedRules)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Pipelines) != 1 || got.Pipelines[0].Name != "build" {
+		t.Errorf("pipelines after delete = %#v", got.Pipelines)
+	}
+	if len(got.Automations) != 1 || got.Automations[0].Name != "unrelated" {
+		t.Errorf("automations after delete = %#v", got.Automations)
+	}
+}
+
+func TestDeletePipelineReturnsErrorWhenNotFound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, &config.AppConfig{
+		Pipelines: []config.PipelineEntry{{Name: "build", Provider: config.ProviderGitHub}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := config.DeletePipeline(path, "missing"); err == nil {
+		t.Fatal("expected missing pipeline error")
+	}
+}

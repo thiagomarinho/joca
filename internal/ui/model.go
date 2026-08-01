@@ -23,6 +23,7 @@ import (
 	"github.com/thiagomarinho/joca/internal/ui/addwizard"
 	"github.com/thiagomarinho/joca/internal/ui/automations"
 	"github.com/thiagomarinho/joca/internal/ui/copypipeline"
+	"github.com/thiagomarinho/joca/internal/ui/deletepipeline"
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
@@ -366,6 +367,10 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stack = append(m.stack, copypipeline.New(m.resolvedCfg.ConfigFile, msg.Entry))
 		return m, nil
 
+	case list.OpenDeleteMsg:
+		m.stack = append(m.stack, deletepipeline.New(m.resolvedCfg.ConfigFile, msg.Entry, m.appCfg.Automations))
+		return m, nil
+
 	case list.OpenBrowserMsg:
 		openBrowser(msg.URL)
 		return m, nil
@@ -402,29 +407,31 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stack = m.stack[:len(m.stack)-1]
 		}
 		m.statusMsg = fmt.Sprintf("Copied %q", msg.Entry.Name)
-		newCfg, err := config.Load(m.resolvedCfg.ConfigFile)
-		if err == nil {
-			m.appCfg = newCfg
-			m.providers = buildProviders(newCfg.Pipelines)
-			newItems := makeItems(newCfg.Pipelines)
-			m.paused = make(map[int]bool)
-			m.awsCreds = map[string]credstatus.Status{"": {Pending: true}}
-			for i, entry := range newCfg.Pipelines {
-				if entry.Paused {
-					m.paused[i] = true
-				}
-				if entry.Provider == config.ProviderAWS {
-					m.awsCreds[entry.AWSProfile] = credstatus.Status{Pending: true}
-				}
-				newItems[i].URL = m.providers[i].URL()
-			}
-			m.globalPaused = len(newCfg.Pipelines) > 0 && len(m.paused) == len(newCfg.Pipelines)
-			m.stack[0] = list.New(newItems)
+		if err := m.reloadPipelines(); err != nil {
+			m.statusMsg = fmt.Sprintf("Copy saved, but reload failed: %v", err)
 		}
-		m.applyAutomationHints()
 		return m, tea.Batch(m.checkCredsCmd(), m.fetchAllCmd(), m.clearStatusAfter(3*time.Second))
 
 	case copypipeline.CancelledMsg:
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		return m, nil
+
+	case deletepipeline.DeletedMsg:
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		m.statusMsg = fmt.Sprintf("Deleted %q", msg.Name)
+		if msg.AutomationsDeleted > 0 {
+			m.statusMsg += fmt.Sprintf(" and %d automation rule(s)", msg.AutomationsDeleted)
+		}
+		if err := m.reloadPipelines(); err != nil {
+			m.statusMsg = fmt.Sprintf("Delete saved, but reload failed: %v", err)
+		}
+		return m, tea.Batch(m.checkCredsCmd(), m.fetchAllCmd(), m.clearStatusAfter(3*time.Second))
+
+	case deletepipeline.CancelledMsg:
 		if len(m.stack) > 1 {
 			m.stack = m.stack[:len(m.stack)-1]
 		}
@@ -544,7 +551,7 @@ func (m *RootModel) View() string {
 
 	// Two-line footer: line1 = primary actions, line2 = secondary actions + status
 	footerLine1 := "  ↑↓: navigate  enter: detail  o: browser  /: search  space: pause  r: refresh  " + triggerHint + "  q: quit"
-	footerLine2 := "  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  c: copy  A: automations"
+	footerLine2 := "  S↑↓: reorder  p: pause all  h: hide/show paused  a: add  c: copy  d: delete  A: automations"
 	if _, ok := m.expiredSSOProfile(); ok {
 		footerLine2 += "  l: SSO login"
 	}
@@ -1147,6 +1154,33 @@ func makeItems(entries []config.PipelineEntry) []list.PipelineItem {
 		items[i] = list.PipelineItem{Entry: e, Paused: e.Paused}
 	}
 	return items
+}
+
+// reloadPipelines reloads persisted pipeline state and rebuilds the runtime
+// providers, list rows, pause indexes, credential profiles, and automation hints.
+func (m *RootModel) reloadPipelines() error {
+	newCfg, err := config.Load(m.resolvedCfg.ConfigFile)
+	if err != nil {
+		return err
+	}
+	m.appCfg = newCfg
+	m.providers = buildProviders(newCfg.Pipelines)
+	newItems := makeItems(newCfg.Pipelines)
+	m.paused = make(map[int]bool)
+	m.awsCreds = map[string]credstatus.Status{"": {Pending: true}}
+	for i, entry := range newCfg.Pipelines {
+		if entry.Paused {
+			m.paused[i] = true
+		}
+		if entry.Provider == config.ProviderAWS {
+			m.awsCreds[entry.AWSProfile] = credstatus.Status{Pending: true}
+		}
+		newItems[i].URL = m.providers[i].URL()
+	}
+	m.globalPaused = len(newCfg.Pipelines) > 0 && len(m.paused) == len(newCfg.Pipelines)
+	m.stack[0] = list.New(newItems)
+	m.applyAutomationHints()
+	return nil
 }
 
 func openBrowser(url string) {

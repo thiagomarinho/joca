@@ -63,6 +63,44 @@ func AddPipeline(path string, entry PipelineEntry) error {
 	return Save(path, cfg)
 }
 
+// DeletePipeline removes the named pipeline and any automation rules that
+// watch or trigger it. It returns the number of automation rules removed.
+func DeletePipeline(path, name string) (int, error) {
+	cfg, err := Load(path)
+	if err != nil {
+		return 0, err
+	}
+
+	found := false
+	pipelines := make([]PipelineEntry, 0, len(cfg.Pipelines))
+	for _, pipeline := range cfg.Pipelines {
+		if pipeline.Name == name {
+			found = true
+			continue
+		}
+		pipelines = append(pipelines, pipeline)
+	}
+	if !found {
+		return 0, fmt.Errorf("pipeline %q not found", name)
+	}
+
+	automations := make([]AutomationRule, 0, len(cfg.Automations))
+	removedRules := 0
+	for _, rule := range cfg.Automations {
+		if rule.WatchPipeline == name || rule.TriggerPipeline == name {
+			removedRules++
+			continue
+		}
+		automations = append(automations, rule)
+	}
+	cfg.Pipelines = pipelines
+	cfg.Automations = automations
+	if err := Save(path, cfg); err != nil {
+		return 0, err
+	}
+	return removedRules, nil
+}
+
 // AddAutomation appends rule to the config at path, returning an error if a
 // rule with the same name already exists or a cycle would be introduced.
 func AddAutomation(path string, rule AutomationRule) error {
