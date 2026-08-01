@@ -69,6 +69,7 @@ joca add aws pipeline-name           # adds an AWS CodePipeline pipeline
 | `N` | Start a new run via workflow dispatch (GitHub only) |
 | `l` | Refresh expired AWS SSO credentials for the selected pipeline |
 | `a` | Add pipeline (inline form) |
+| `c` | Copy the selected pipeline and customize its settings |
 | `q` / `Ctrl+C` | Quit |
 
 ---

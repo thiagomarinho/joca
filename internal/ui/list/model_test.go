@@ -286,6 +286,32 @@ func TestHidePaused_allPausedEmptyVisible(t *testing.T) {
 	}
 }
 
+func TestCopyUsesSelectedVisiblePipeline(t *testing.T) {
+	m := makeModelWithPaused(
+		struct {
+			name   string
+			paused bool
+		}{"hidden", true},
+		struct {
+			name   string
+			paused bool
+		}{"visible", false},
+	)
+	m.HidePaused = true
+
+	_, cmd := m.Update(keyMsgFromString("c"))
+	if cmd == nil {
+		t.Fatal("expected copy command")
+	}
+	msg, ok := cmd().(OpenCopyMsg)
+	if !ok {
+		t.Fatalf("expected OpenCopyMsg, got %T", cmd())
+	}
+	if msg.Entry.Name != "visible" {
+		t.Errorf("copy entry = %q, want %q", msg.Entry.Name, "visible")
+	}
+}
+
 // --- Fuzzy search tests ---
 
 // typeSearch sends "/" to enter search mode, then types the given query one

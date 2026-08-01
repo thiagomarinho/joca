@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
 )
 
@@ -20,6 +21,9 @@ type OpenDetailMsg struct{ Item PipelineItem }
 
 // OpenAddFormMsg asks the root model to push the add-pipeline form.
 type OpenAddFormMsg struct{}
+
+// OpenCopyMsg asks the root model to copy the selected pipeline.
+type OpenCopyMsg struct{ Entry config.PipelineEntry }
 
 // OpenAutomationsMsg asks the root model to push the automation rules view.
 type OpenAutomationsMsg struct{}
@@ -170,6 +174,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "a":
 			return m, func() tea.Msg { return OpenAddFormMsg{} }
+		case "c":
+			if len(vi) > 0 {
+				entry := m.Items[vi[m.cursor]].Entry
+				return m, func() tea.Msg { return OpenCopyMsg{Entry: entry} }
+			}
 		case "A":
 			return m, func() tea.Msg { return OpenAutomationsMsg{} }
 		case " ":
