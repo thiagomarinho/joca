@@ -26,6 +26,7 @@ import (
 	"github.com/thiagomarinho/joca/internal/ui/deletepipeline"
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
+	"github.com/thiagomarinho/joca/internal/ui/logsearch"
 	"github.com/thiagomarinho/joca/internal/ui/settings"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
 	uitelemetry "github.com/thiagomarinho/joca/internal/ui/telemetry"
@@ -392,6 +393,23 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stack = append(m.stack, detail.New(msg.Item))
 		return m, nil
 
+	case detail.OpenLogSearchMsg:
+		for i, entry := range m.appCfg.Pipelines {
+			if entry.Name == msg.Item.Entry.Name && i < len(m.providers) {
+				p := m.providers[i]
+				m.stack = append(m.stack, logsearch.New(entry.Name, p.RecentRuns))
+				return m, nil
+			}
+		}
+		m.statusMsg = fmt.Sprintf("Unable to search logs: pipeline %q not found", msg.Item.Entry.Name)
+		return m, m.clearStatusAfter(3 * time.Second)
+
+	case logsearch.BackMsg:
+		if len(m.stack) > 1 {
+			m.stack = m.stack[:len(m.stack)-1]
+		}
+		return m, nil
+
 	case list.OpenAddFormMsg:
 		m.stack = append(m.stack, addwizard.New(
 			m.resolvedCfg.ConfigFile,
@@ -600,6 +618,9 @@ func (m *RootModel) View() string {
 
 	// Credential status (only on the list screen)
 	sb.WriteString(m.credStatusView())
+	if len(m.stack) != 1 {
+		return sb.String()
+	}
 
 	// Footer bar
 	sb.WriteByte('\n')

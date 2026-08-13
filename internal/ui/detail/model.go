@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
@@ -33,6 +34,10 @@ type pagerClosedMsg struct {
 	path string
 	err  error
 }
+
+// OpenLogSearchMsg asks the root model to search recent CodeBuild logs for
+// this pipeline.
+type OpenLogSearchMsg struct{ Item list.PipelineItem }
 
 // Model shows the detail view for a selected pipeline.
 type Model struct {
@@ -99,6 +104,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					sources, err := loadSources(ctx)
 					return logSourcesLoadedMsg{sources: sources, err: err}
 				}
+			}
+		case "/":
+			if m.item.Entry.Provider == config.ProviderAWS && !m.loading {
+				return m, func() tea.Msg { return OpenLogSearchMsg{Item: m.item} }
 			}
 			if run, ok := m.selectedLogRun(); ok && run.Logs != nil && m.logs == "" && !m.loading {
 				m.loading = true
@@ -266,7 +275,12 @@ func (m Model) View() string {
 	}
 
 	sb.WriteString("\n  ")
-	sb.WriteString(styles.Footer.Render("↑↓: select run  o: open in browser  esc: back"))
+	footer := "↑↓: select run  o: open in browser"
+	if item.Entry.Provider == config.ProviderAWS {
+		footer += "  /: search CodeBuild logs"
+	}
+	footer += "  esc: back"
+	sb.WriteString(styles.Footer.Render(footer))
 	return sb.String()
 }
 

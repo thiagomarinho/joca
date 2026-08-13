@@ -46,6 +46,25 @@ func TestTogglePauseWhilePausedPipelinesHiddenClampsCursor(t *testing.T) {
 	}
 }
 
+func TestPipelineDetailDoesNotShowListScreenFooter(t *testing.T) {
+	appCfg := &config.AppConfig{
+		Pipelines: []config.PipelineEntry{{
+			Name: "pipeline", Provider: config.ProviderAWS,
+		}},
+	}
+	m := New(appCfg, config.Config{})
+	item := m.stack[0].(list.Model).Items[0]
+	m.Update(list.OpenDetailMsg{Item: item})
+
+	view := m.View()
+	if count := strings.Count(view, "/: search"); count != 1 {
+		t.Fatalf("detail search shortcut count = %d, want 1:\n%s", count, view)
+	}
+	if strings.Contains(view, "space: pause") {
+		t.Fatal("pipeline list footer should not appear on the detail screen")
+	}
+}
+
 func TestFocusResumesSelectedPipelineAndPausesOthers(t *testing.T) {
 	appCfg := &config.AppConfig{
 		Pipelines: []config.PipelineEntry{

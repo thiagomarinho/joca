@@ -9,9 +9,27 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 )
+
+func TestCodeBuildLogSearchOpensForAWSPipeline(t *testing.T) {
+	item := list.PipelineItem{Entry: config.PipelineEntry{Name: "pipeline", Provider: config.ProviderAWS}}
+	m := New(item)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if cmd == nil {
+		t.Fatal("expected log search command")
+	}
+	msg, ok := cmd().(OpenLogSearchMsg)
+	if !ok || msg.Item.Entry.Name != "pipeline" {
+		t.Fatalf("message = %#v, want OpenLogSearchMsg for pipeline", msg)
+	}
+	if !strings.Contains(m.View(), "/: search CodeBuild logs") {
+		t.Fatal("expected CodeBuild log search shortcut in detail footer")
+	}
+}
 
 func TestLoadLogsShowsCodeBuildActionPicker(t *testing.T) {
 	run := provider.Run{
