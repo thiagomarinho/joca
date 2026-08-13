@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,6 +148,34 @@ func TestSSOLoginShortcutAvailableForSelectedExpiredAWSProfile(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 	if cmd == nil {
 		t.Fatal("expected SSO login command for selected expired AWS profile")
+	}
+	if m.statusMsg != "Opening AWS SSO login for profile \"production\"…" {
+		t.Errorf("status message = %q", m.statusMsg)
+	}
+}
+
+func TestSSOLoginShortcutRemainsAvailableAfterSelectingAnotherPipeline(t *testing.T) {
+	appCfg := &config.AppConfig{
+		Pipelines: []config.PipelineEntry{
+			{Name: "aws", Provider: config.ProviderAWS, AWSProfile: "production"},
+			{Name: "github", Provider: config.ProviderGitHub},
+		},
+	}
+	m := New(appCfg, config.Config{})
+	m.awsCreds = map[string]credstatus.Status{
+		"production": {Err: errors.New("SSO token has expired")},
+	}
+
+	// Navigate away from the AWS row. The login action must still be rendered
+	// and use the expired profile.
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if view := m.View(); !strings.Contains(view, "l: SSO login") {
+		t.Fatal("expected SSO login option after selecting a non-AWS pipeline")
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	if cmd == nil {
+		t.Fatal("expected SSO login command after selecting a non-AWS pipeline")
 	}
 	if m.statusMsg != "Opening AWS SSO login for profile \"production\"…" {
 		t.Errorf("status message = %q", m.statusMsg)

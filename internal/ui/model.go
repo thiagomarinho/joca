@@ -835,8 +835,9 @@ func (m *RootModel) missingAWSProfiles() []string {
 	return missing
 }
 
-// expiredSSOProfile returns the AWS profile for the selected pipeline when its
-// cached SSO credentials need to be refreshed.
+// expiredSSOProfile returns an AWS profile whose cached SSO credentials need
+// to be refreshed. The selected pipeline's profile is preferred, but an
+// expired profile remains available while another pipeline is selected.
 func (m *RootModel) expiredSSOProfile() (string, bool) {
 	if len(m.stack) != 1 {
 		return "", false
@@ -845,13 +846,24 @@ func (m *RootModel) expiredSSOProfile() (string, bool) {
 	if !ok {
 		return "", false
 	}
-	item, ok := listView.Selected()
-	if !ok || item.Entry.Provider != config.ProviderAWS {
+	if item, selected := listView.Selected(); selected && item.Entry.Provider == config.ProviderAWS {
+		profile := item.Entry.AWSProfile
+		if status, configured := m.awsCreds[profile]; configured && provider.IsSSOError(status.Err) {
+			return profile, true
+		}
+	}
+
+	profiles := make([]string, 0, len(m.awsCreds))
+	for profile, status := range m.awsCreds {
+		if provider.IsSSOError(status.Err) {
+			profiles = append(profiles, profile)
+		}
+	}
+	if len(profiles) == 0 {
 		return "", false
 	}
-	profile := item.Entry.AWSProfile
-	status, ok := m.awsCreds[profile]
-	return profile, ok && provider.IsSSOError(status.Err)
+	sort.Strings(profiles)
+	return profiles[0], true
 }
 
 func awsSSOLoginCommand(profile string) *exec.Cmd {
