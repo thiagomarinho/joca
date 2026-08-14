@@ -243,12 +243,12 @@ func (m Model) View() string {
 		}
 		sb.WriteString("\n  " + styles.Footer.Render("tab: change field  enter: search  esc: back"))
 	case phaseLoading:
-		sb.WriteString(fmt.Sprintf("  Loading %s executions…", m.depth))
+		fmt.Fprintf(&sb, "  Loading %s executions…", m.depth)
 	case phaseSearching:
-		sb.WriteString(fmt.Sprintf("  Searching execution %d/%d…\n", m.searched+1, len(m.runs)))
-		sb.WriteString(fmt.Sprintf("  Matches so far: %d", len(m.matches)))
+		fmt.Fprintf(&sb, "  Searching execution %d/%d…\n", m.searched+1, len(m.runs))
+		fmt.Fprintf(&sb, "  Matches so far: %d", len(m.matches))
 	case phaseResults:
-		sb.WriteString(fmt.Sprintf("  Expression: %q  ·  searched: %d  ·  matches: %d\n\n", m.query, m.searched, len(m.matches)))
+		fmt.Fprintf(&sb, "  Expression: %q  ·  searched: %d  ·  matches: %d\n\n", m.query, m.searched, len(m.matches))
 		if len(m.matches) == 0 {
 			sb.WriteString("  No matching executions.\n")
 		}
@@ -270,14 +270,14 @@ func (m Model) View() string {
 				if project == "" {
 					project = "unknown project"
 				}
-				sb.WriteString(fmt.Sprintf("      %s  ·  %s\n", project, source.name))
+				fmt.Fprintf(&sb, "      %s  ·  %s\n", project, source.name)
 			}
 		}
 		if m.err != "" {
 			sb.WriteString("\n  " + styles.StatusFailed.Render(m.err) + "\n")
 		}
 		if len(m.errors) > 0 {
-			sb.WriteString(fmt.Sprintf("\n  %s\n", styles.StatusFailed.Render(fmt.Sprintf("%d execution(s) could not be searched", len(m.errors)))))
+			fmt.Fprintf(&sb, "\n  %s\n", styles.StatusFailed.Render(fmt.Sprintf("%d execution(s) could not be searched", len(m.errors))))
 		}
 		if m.openStatus != "" {
 			sb.WriteString("\n  " + styles.Footer.Render(m.openStatus) + "\n")
