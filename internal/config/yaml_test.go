@@ -54,6 +54,7 @@ func TestSaveAndLoad_roundtrip(t *testing.T) {
 		RefreshInterval:   "60s",
 		DefaultAWSProfile: "production",
 		DefaultAWSRegion:  "ca-central-1",
+		LogEditor:         "code-insiders --wait",
 		Pipelines: []config.PipelineEntry{
 			{Name: "my-api", Provider: config.ProviderGitHub, Owner: "acme", Repo: "my-api"},
 			{Name: "infra", Provider: config.ProviderAWS, PipelineName: "infra-deploy", AWSRegion: "us-east-1"},
@@ -74,6 +75,9 @@ func TestSaveAndLoad_roundtrip(t *testing.T) {
 	}
 	if loaded.DefaultAWSRegion != "ca-central-1" {
 		t.Errorf("default_aws_region: got %q, want ca-central-1", loaded.DefaultAWSRegion)
+	}
+	if loaded.LogEditor != "code-insiders --wait" {
+		t.Errorf("log_editor: got %q, want code-insiders --wait", loaded.LogEditor)
 	}
 	if len(loaded.Pipelines) != 2 {
 		t.Fatalf("expected 2 pipelines, got %d", len(loaded.Pipelines))

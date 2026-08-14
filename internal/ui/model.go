@@ -390,14 +390,14 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Messages from child views
 	case list.OpenDetailMsg:
-		m.stack = append(m.stack, detail.New(msg.Item))
+		m.stack = append(m.stack, detail.New(msg.Item, m.appCfg.LogEditor))
 		return m, nil
 
 	case detail.OpenLogSearchMsg:
 		for i, entry := range m.appCfg.Pipelines {
 			if entry.Name == msg.Item.Entry.Name && i < len(m.providers) {
 				p := m.providers[i]
-				m.stack = append(m.stack, logsearch.New(entry.Name, p.RecentRuns))
+				m.stack = append(m.stack, logsearch.New(entry.Name, m.appCfg.LogEditor, p.RecentRuns))
 				return m, nil
 			}
 		}
@@ -499,6 +499,7 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appCfg.RefreshInterval = msg.RefreshInterval
 		m.appCfg.DefaultAWSProfile = msg.DefaultAWSProfile
 		m.appCfg.DefaultAWSRegion = msg.DefaultAWSRegion
+		m.appCfg.LogEditor = msg.LogEditor
 		m.refreshInterval, _ = time.ParseDuration(msg.RefreshInterval)
 		m.tickGeneration++
 		m.statusMsg = "Configuration saved"

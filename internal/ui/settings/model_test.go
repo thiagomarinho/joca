@@ -14,8 +14,9 @@ func TestNewPrefillsConfiguration(t *testing.T) {
 		RefreshInterval:   "45s",
 		DefaultAWSProfile: "production",
 		DefaultAWSRegion:  "ca-central-1",
+		LogEditor:         "code-insiders --wait",
 	})
-	if m.values[fieldRefreshInterval] != "45s" || m.values[fieldDefaultAWSProfile] != "production" || m.values[fieldDefaultAWSRegion] != "ca-central-1" {
+	if m.values[fieldRefreshInterval] != "45s" || m.values[fieldDefaultAWSProfile] != "production" || m.values[fieldDefaultAWSRegion] != "ca-central-1" || m.values[fieldLogEditor] != "code-insiders --wait" {
 		t.Errorf("settings were not prefilled: %#v", m.values)
 	}
 }
@@ -32,13 +33,13 @@ func TestSaveRejectsRefreshIntervalBelowMinimum(t *testing.T) {
 }
 
 func TestSaveEmitsValidatedSettings(t *testing.T) {
-	m := New(config.AppConfig{RefreshInterval: "2m", DefaultAWSProfile: "prod", DefaultAWSRegion: "us-east-1"})
+	m := New(config.AppConfig{RefreshInterval: "2m", DefaultAWSProfile: "prod", DefaultAWSRegion: "us-east-1", LogEditor: "zed --wait"})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected save command")
 	}
 	msg := cmd().(SavedMsg)
-	if msg.RefreshInterval != "2m" || msg.DefaultAWSProfile != "prod" || msg.DefaultAWSRegion != "us-east-1" {
+	if msg.RefreshInterval != "2m" || msg.DefaultAWSProfile != "prod" || msg.DefaultAWSRegion != "us-east-1" || msg.LogEditor != "zed --wait" {
 		t.Errorf("saved settings = %#v", msg)
 	}
 }

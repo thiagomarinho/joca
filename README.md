@@ -34,6 +34,7 @@ joca stores its config at `~/.joca/config.yaml`.
 refresh_interval: 30s # minimum: 10s
 default_aws_profile: production  # optional; prefills the AWS add wizard
 default_aws_region: ca-central-1 # optional; prefills the AWS add wizard
+log_editor: code                 # optional; otherwise uses $CODE, then code
 pipelines:
   - name: my-app CI
     provider: github
@@ -73,6 +74,8 @@ choose a suggestion and `→` to complete it.
 | `Enter` | Open pipeline detail / run logs |
 | `o` | Open in browser |
 | `l` (detail) | Download and open logs for the selected run |
+| `e` (detail/search results) | Download and open logs in a code editor |
+| `/` (AWS detail) | Search CodeBuild logs across recent executions |
 | `Space` | Pause / resume auto-refresh for pipeline |
 | `f` | Focus selected pipeline: resume it, pause all others, and hide paused pipelines |
 | `r` | Refresh all now |
@@ -90,6 +93,11 @@ actions backed by CloudWatch Logs. If an execution contains multiple CodeBuild
 actions, select the stage/action whose logs you want. Logs are written with
 private permissions to a temporary `joca-logs-*` directory and opened with
 `$PAGER`, `bat`, or `less`; the built-in viewer is used when none is available.
+Press `e` instead to open downloaded logs in a code editor. The editor command
+is selected from the `log_editor` application setting, then `$CODE`, then
+`code`. Configure it from the in-app configuration screen; commands may include
+arguments. GUI editor launchers return immediately so you can open multiple
+logs; add `--wait` explicitly if you prefer blocking behavior.
 
 The AWS identity used by the pipeline profile needs these additional actions:
 `codepipeline:ListActionExecutions`, `codebuild:BatchGetBuilds`, and

@@ -107,6 +107,7 @@ func TestSettingsSaveUpdatesRuntimeAndConfiguration(t *testing.T) {
 		RefreshInterval:   "2m",
 		DefaultAWSProfile: "production",
 		DefaultAWSRegion:  "ca-central-1",
+		LogEditor:         "code-insiders --wait",
 	})
 	if cmd == nil {
 		t.Fatal("expected persistence and timer commands")
@@ -119,6 +120,9 @@ func TestSettingsSaveUpdatesRuntimeAndConfiguration(t *testing.T) {
 	}
 	if appCfg.DefaultAWSProfile != "production" || appCfg.DefaultAWSRegion != "ca-central-1" {
 		t.Errorf("AWS defaults were not updated: %#v", appCfg)
+	}
+	if appCfg.LogEditor != "code-insiders --wait" {
+		t.Errorf("log editor was not updated: %q", appCfg.LogEditor)
 	}
 
 	_, staleCmd := m.Update(tickMsg{generation: 0})

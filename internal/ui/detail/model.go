@@ -14,6 +14,7 @@ import (
 	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 	"github.com/thiagomarinho/joca/internal/ui/list"
+	"github.com/thiagomarinho/joca/internal/ui/logopen"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
 )
 
@@ -50,10 +51,16 @@ type Model struct {
 	logCursor  int
 	logMessage string
 	height     int
+	logEditor  string
+	openEditor bool
 }
 
-func New(item list.PipelineItem) Model {
-	return Model{item: item, cursor: -1}
+func New(item list.PipelineItem, logEditor ...string) Model {
+	m := Model{item: item, cursor: -1}
+	if len(logEditor) > 0 {
+		m.logEditor = logEditor[0]
+	}
+	return m
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -77,7 +84,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.logCursor++
 				}
 				return m, nil
-			case "enter", "l":
+			case "enter", "l", "e":
+				m.openEditor = msg.String() == "e"
 				m.loading = true
 				return m, downloadLogCmd(m.logSources[m.logCursor])
 			}
@@ -94,6 +102,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, func() tea.Msg { return list.OpenBrowserMsg{URL: url} }
 		case "l":
+			m.openEditor = false
+			if run, ok := m.selectedLogRun(); ok && run.LogSources != nil && !m.loading {
+				m.loading = true
+				m.logMessage = "Discovering CodeBuild actions…"
+				loadSources := run.LogSources
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					sources, err := loadSources(ctx)
+					return logSourcesLoadedMsg{sources: sources, err: err}
+				}
+			}
+			if run, ok := m.selectedLogRun(); ok && run.Logs != nil && m.logs == "" && !m.loading {
+				m.loading = true
+				m.logMessage = "Loading logs…"
+				logFn := run.Logs
+				return m, func() tea.Msg {
+					content, err := logFn(context.Background())
+					if err != nil {
+						return logLoadedMsg{content: fmt.Sprintf("error loading logs: %v", err)}
+					}
+					return logLoadedMsg{content: content}
+				}
+			}
+		case "e":
+			m.openEditor = true
 			if run, ok := m.selectedLogRun(); ok && run.LogSources != nil && !m.loading {
 				m.loading = true
 				m.logMessage = "Discovering CodeBuild actions…"
@@ -108,18 +142,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			if m.item.Entry.Provider == config.ProviderAWS && !m.loading {
 				return m, func() tea.Msg { return OpenLogSearchMsg{Item: m.item} }
-			}
-			if run, ok := m.selectedLogRun(); ok && run.Logs != nil && m.logs == "" && !m.loading {
-				m.loading = true
-				m.logMessage = "Loading logs…"
-				logFn := run.Logs
-				return m, func() tea.Msg {
-					content, err := logFn(context.Background())
-					if err != nil {
-						return logLoadedMsg{content: fmt.Sprintf("error loading logs: %v", err)}
-					}
-					return logLoadedMsg{content: content}
-				}
 			}
 		case "up", "k":
 			if m.logs != "" {
@@ -166,17 +188,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.logSources = nil
-		if cmd, ok := pagerCommand(msg.path); ok {
+		var cmd *exec.Cmd
+		var ok bool
+		if m.openEditor {
+			cmd, ok = logopen.Editor(m.logEditor, msg.path)
+		} else {
+			cmd, ok = logopen.Pager(msg.path)
+		}
+		if ok {
+			m.logMessage = fmt.Sprintf("Opening logs using %s…", filepath.Base(cmd.Args[0]))
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				return pagerClosedMsg{path: msg.path, err: err}
 			})
+		}
+		if m.openEditor {
+			m.logMessage = fmt.Sprintf("Editor command not found; logs saved to %s", msg.path)
+			return m, nil
 		}
 		m.logs = msg.content
 		m.logMessage = fmt.Sprintf("Logs downloaded to %s", msg.path)
 
 	case pagerClosedMsg:
 		if msg.err != nil {
-			m.logMessage = fmt.Sprintf("Pager failed: %v (logs: %s)", msg.err, msg.path)
+			m.logMessage = fmt.Sprintf("Log viewer failed: %v (logs: %s)", msg.err, msg.path)
 		} else {
 			m.logMessage = fmt.Sprintf("Logs downloaded to %s", msg.path)
 		}
@@ -256,6 +290,9 @@ func (m Model) View() string {
 			sb.WriteString(line)
 			sb.WriteByte('\n')
 		}
+		sb.WriteString("\n  ")
+		sb.WriteString(styles.Footer.Render("enter/l: open in pager  e: open in editor  esc: cancel"))
+		sb.WriteByte('\n')
 	case m.logs != "":
 		sb.WriteString("\n")
 		sb.WriteString(styles.LogContainer.Render(m.logs))
@@ -265,7 +302,12 @@ func (m Model) View() string {
 		sb.WriteByte('\n')
 	case m.hasLogs():
 		sb.WriteString("\n  ")
-		sb.WriteString(styles.Footer.Render("Press l to download logs"))
+		run, _ := m.selectedLogRun()
+		if run.LogSources != nil {
+			sb.WriteString(styles.Footer.Render("l: open logs in pager  e: open logs in editor"))
+		} else {
+			sb.WriteString(styles.Footer.Render("Press l to load logs"))
+		}
 		sb.WriteByte('\n')
 	}
 	if m.logMessage != "" && !m.loading {
@@ -339,21 +381,6 @@ func safeLogFilename(name string) string {
 		}
 	}
 	return sb.String()
-}
-
-func pagerCommand(path string) (*exec.Cmd, bool) {
-	if configured := strings.Fields(os.Getenv("PAGER")); len(configured) > 0 {
-		if executable, err := exec.LookPath(configured[0]); err == nil {
-			return exec.Command(executable, append(configured[1:], path)...), true
-		}
-	}
-	if executable, err := exec.LookPath("bat"); err == nil {
-		return exec.Command(executable, "--paging=always", path), true
-	}
-	if executable, err := exec.LookPath("less"); err == nil {
-		return exec.Command(executable, "-R", path), true
-	}
-	return nil, false
 }
 
 func renderDetailStatus(r provider.Run) string {

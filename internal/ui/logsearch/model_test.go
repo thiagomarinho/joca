@@ -3,6 +3,7 @@ package logsearch
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestSearchReportsProgressAndCollectsMatchingExecutions(t *testing.T) {
 		{ID: "execution-2", LogSources: sourcesWithLogs("compile", "all good")},
 		{ID: "execution-1", LogSources: sourcesWithLogs("test", "fatal: needle found")},
 	}
-	m := New("pipeline", func(context.Context, int) ([]provider.Run, error) { return runs, nil })
+	m := New("pipeline", "", func(context.Context, int) ([]provider.Run, error) { return runs, nil })
 	m.query = "needle"
 	m.depth = "2"
 
@@ -89,7 +90,7 @@ func TestOpenedLogsIdentifyCodeBuildProject(t *testing.T) {
 			name: "Build / compile", project: "payments-build", content: "needle",
 		}},
 	}
-	msg := writeMatchLogsCmd("pipeline", match)().(logsWrittenMsg)
+	msg := writeMatchLogsCmd("pipeline", match, false)().(logsWrittenMsg)
 	if msg.err != nil {
 		t.Fatalf("writeMatchLogsCmd() error = %v", msg.err)
 	}
@@ -99,6 +100,24 @@ func TestOpenedLogsIdentifyCodeBuildProject(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "CodeBuild project: payments-build") {
 		t.Fatalf("opened logs do not identify project:\n%s", content)
+	}
+}
+
+func TestOpeningLogsShowsResolvedEditor(t *testing.T) {
+	dir := t.TempDir()
+	editor := filepath.Join(dir, "custom-code")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{phase: phaseResults, logEditor: editor}
+
+	updated, cmd := m.Update(logsWrittenMsg{path: "/tmp/log.txt", editor: true})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected editor launch command")
+	}
+	if m.openStatus != "Opening logs using custom-code…" {
+		t.Fatalf("status = %q", m.openStatus)
 	}
 }
 

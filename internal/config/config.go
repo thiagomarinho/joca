@@ -64,6 +64,7 @@ type AppConfig struct {
 	RefreshInterval   string           `yaml:"refresh_interval"`
 	DefaultAWSProfile string           `yaml:"default_aws_profile,omitempty"`
 	DefaultAWSRegion  string           `yaml:"default_aws_region,omitempty"`
+	LogEditor         string           `yaml:"log_editor,omitempty"`
 	Pipelines         []PipelineEntry  `yaml:"pipelines"`
 	Automations       []AutomationRule `yaml:"automations,omitempty"`
 	// AutomationAllowChains controls whether automation rules may form chains

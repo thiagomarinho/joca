@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/thiagomarinho/joca/internal/provider"
+	"github.com/thiagomarinho/joca/internal/ui/logopen"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
 )
 
@@ -40,8 +41,9 @@ type runSearchedMsg struct {
 }
 
 type logsWrittenMsg struct {
-	path string
-	err  error
+	path   string
+	editor bool
+	err    error
 }
 
 type pagerClosedMsg struct{ err error }
@@ -63,6 +65,7 @@ type matchedSource struct {
 type Model struct {
 	pipeline   string
 	loadRuns   recentRunsFunc
+	logEditor  string
 	phase      phase
 	field      int
 	query      string
@@ -77,8 +80,8 @@ type Model struct {
 }
 
 // New creates a log search with a default depth of ten executions.
-func New(pipeline string, loadRuns recentRunsFunc) Model {
-	return Model{pipeline: pipeline, loadRuns: loadRuns, depth: "10"}
+func New(pipeline, logEditor string, loadRuns recentRunsFunc) Model {
+	return Model{pipeline: pipeline, logEditor: logEditor, loadRuns: loadRuns, depth: "10"}
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -101,10 +104,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < len(m.matches)-1 {
 					m.cursor++
 				}
-			case "enter", "l":
+			case "enter", "l", "e":
 				if len(m.matches) > 0 {
 					m.openStatus = "Preparing matching logs…"
-					return m, writeMatchLogsCmd(m.pipeline, m.matches[m.cursor])
+					return m, writeMatchLogsCmd(m.pipeline, m.matches[m.cursor], msg.String() == "e")
 				}
 			}
 		}
@@ -144,17 +147,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openStatus = fmt.Sprintf("Unable to open logs: %v", msg.err)
 			return m, nil
 		}
-		cmd, ok := pagerCommand(msg.path)
+		var cmd *exec.Cmd
+		var ok bool
+		if msg.editor {
+			cmd, ok = logopen.Editor(m.logEditor, msg.path)
+		} else {
+			cmd, ok = logopen.Pager(msg.path)
+		}
 		if !ok {
-			m.openStatus = "Logs saved to " + msg.path
+			if msg.editor {
+				m.openStatus = "Editor command not found; logs saved to " + msg.path
+			} else {
+				m.openStatus = "Logs saved to " + msg.path
+			}
 			return m, nil
 		}
-		m.openStatus = ""
+		m.openStatus = fmt.Sprintf("Opening logs using %s…", filepath.Base(cmd.Args[0]))
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return pagerClosedMsg{err: err} })
 
 	case pagerClosedMsg:
 		if msg.err != nil {
-			m.openStatus = fmt.Sprintf("Pager failed: %v", msg.err)
+			m.openStatus = fmt.Sprintf("Log viewer failed: %v", msg.err)
 		} else {
 			m.openStatus = "Returned from logs"
 		}
@@ -269,7 +282,7 @@ func (m Model) View() string {
 		if m.openStatus != "" {
 			sb.WriteString("\n  " + styles.Footer.Render(m.openStatus) + "\n")
 		}
-		sb.WriteString("\n  " + styles.Footer.Render("↑↓: select  enter/l: open matching logs  esc: pipeline detail"))
+		sb.WriteString("\n  " + styles.Footer.Render("↑↓: select  l: open logs in pager  e: open logs in editor  esc: pipeline detail"))
 	}
 	return sb.String()
 }
@@ -306,7 +319,7 @@ func searchRunCmd(run provider.Run, query string) tea.Cmd {
 	}
 }
 
-func writeMatchLogsCmd(pipeline string, match searchMatch) tea.Cmd {
+func writeMatchLogsCmd(pipeline string, match searchMatch, editor bool) tea.Cmd {
 	return func() tea.Msg {
 		dir, err := os.MkdirTemp("", "joca-log-search-*")
 		if err != nil {
@@ -325,7 +338,7 @@ func writeMatchLogsCmd(pipeline string, match searchMatch) tea.Cmd {
 		if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
 			return logsWrittenMsg{err: fmt.Errorf("writing logs: %w", err)}
 		}
-		return logsWrittenMsg{path: path}
+		return logsWrittenMsg{path: path, editor: editor}
 	}
 }
 
@@ -336,19 +349,4 @@ func safeFilename(name string) string {
 		}
 		return '-'
 	}, name)
-}
-
-func pagerCommand(path string) (*exec.Cmd, bool) {
-	if configured := strings.Fields(os.Getenv("PAGER")); len(configured) > 0 {
-		if executable, err := exec.LookPath(configured[0]); err == nil {
-			return exec.Command(executable, append(configured[1:], path)...), true
-		}
-	}
-	if executable, err := exec.LookPath("bat"); err == nil {
-		return exec.Command(executable, "--paging=always", path), true
-	}
-	if executable, err := exec.LookPath("less"); err == nil {
-		return exec.Command(executable, "-R", path), true
-	}
-	return nil, false
 }

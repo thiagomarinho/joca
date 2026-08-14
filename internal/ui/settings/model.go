@@ -16,6 +16,7 @@ type SavedMsg struct {
 	RefreshInterval   string
 	DefaultAWSProfile string
 	DefaultAWSRegion  string
+	LogEditor         string
 }
 
 // CancelledMsg is emitted when the user leaves without saving.
@@ -27,6 +28,7 @@ const (
 	fieldRefreshInterval field = iota
 	fieldDefaultAWSProfile
 	fieldDefaultAWSRegion
+	fieldLogEditor
 	fieldCount
 )
 
@@ -43,6 +45,7 @@ func New(cfg config.AppConfig) Model {
 	m.values[fieldRefreshInterval] = cfg.RefreshInterval
 	m.values[fieldDefaultAWSProfile] = cfg.DefaultAWSProfile
 	m.values[fieldDefaultAWSRegion] = cfg.DefaultAWSRegion
+	m.values[fieldLogEditor] = cfg.LogEditor
 	return m
 }
 
@@ -94,6 +97,7 @@ func (m Model) save() (tea.Model, tea.Cmd) {
 		RefreshInterval:   interval,
 		DefaultAWSProfile: strings.TrimSpace(m.values[fieldDefaultAWSProfile]),
 		DefaultAWSRegion:  strings.TrimSpace(m.values[fieldDefaultAWSRegion]),
+		LogEditor:         strings.TrimSpace(m.values[fieldLogEditor]),
 	}
 	return m, func() tea.Msg { return msg }
 }
@@ -108,10 +112,12 @@ func (m Model) View() string {
 		"Refresh interval",
 		"Default AWS profile/role",
 		"Default AWS region",
+		"Log editor command",
 	}
 	hints := [fieldCount]string{
 		fmt.Sprintf("Minimum %s; examples: 30s, 2m, 1h", config.MinRefreshInterval),
 		"Optional; prefills new AWS pipelines",
+		"Optional; defaults to $CODE, then code (add --wait to block)",
 		"Optional; prefills new AWS pipelines",
 	}
 	for i := field(0); i < fieldCount; i++ {
