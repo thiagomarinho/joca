@@ -67,10 +67,23 @@ type AppConfig struct {
 	LogEditor         string           `yaml:"log_editor,omitempty"`
 	Pipelines         []PipelineEntry  `yaml:"pipelines"`
 	Automations       []AutomationRule `yaml:"automations,omitempty"`
+	SavedLogSearches  []SavedLogSearch `yaml:"saved_log_searches,omitempty"`
 	// AutomationAllowChains controls whether automation rules may form chains
 	// (A triggers B, B triggers C). Self-references are always prohibited.
 	// Defaults to true when omitted from YAML.
 	AutomationAllowChains *bool `yaml:"automation_allow_chains,omitempty"`
+}
+
+// SavedLogSearch stores a reusable CodeBuild log-search configuration.
+// Pipeline is empty for searches available to every AWS pipeline.
+type SavedLogSearch struct {
+	Name            string `yaml:"name"`
+	Pipeline        string `yaml:"pipeline,omitempty"`
+	Expression      string `yaml:"expression"`
+	Executions      int    `yaml:"executions"`
+	ContextLines    int    `yaml:"context_lines,omitempty"`
+	Regex           bool   `yaml:"regex,omitempty"`
+	CaseInsensitive bool   `yaml:"case_insensitive,omitempty"`
 }
 
 // AllowChains reports whether automation rule chaining is permitted.

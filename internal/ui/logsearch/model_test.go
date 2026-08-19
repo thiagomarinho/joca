@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 )
 
@@ -62,6 +63,39 @@ func TestSearchInputAcceptsSpacesAndRejectsInvalidRegex(t *testing.T) {
 	m = updated.(Model)
 	if cmd != nil || !strings.Contains(m.err, "Invalid regular expression") {
 		t.Fatalf("invalid regex was accepted: cmd=%v err=%q", cmd != nil, m.err)
+	}
+}
+
+func TestSavedSearchPrefillsAllOptions(t *testing.T) {
+	m := NewWithSaved("pipeline", "", nil, config.SavedLogSearch{
+		Expression: "error.*timeout", Executions: 25, ContextLines: 4,
+		Regex: true, CaseInsensitive: true,
+	})
+	if m.query != "error.*timeout" || m.depth != "25" || m.context != "4" || m.matchMode != 3 {
+		t.Fatalf("saved search was not prefilled: %#v", m)
+	}
+}
+
+func TestSaveCompletedSearchWithPipelineOrGlobalScope(t *testing.T) {
+	m := Model{
+		pipeline: "deploy", phase: phaseResults, saving: true, saveName: "timeouts",
+		depth: "15", options: searchOptions{
+			query: "timeout", regex: false, caseInsensitive: true, contextLines: 3,
+		},
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected save command")
+	}
+	search := cmd().(SaveMsg).Search
+	if search.Pipeline != "deploy" || search.Executions != 15 || !search.CaseInsensitive {
+		t.Fatalf("pipeline saved search = %#v", search)
+	}
+
+	m.saveGlobal = true
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if search := cmd().(SaveMsg).Search; search.Pipeline != "" {
+		t.Fatalf("global saved search has pipeline %q", search.Pipeline)
 	}
 }
 

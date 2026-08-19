@@ -27,6 +27,7 @@ import (
 	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
 	"github.com/thiagomarinho/joca/internal/ui/logsearch"
+	"github.com/thiagomarinho/joca/internal/ui/savedsearches"
 	"github.com/thiagomarinho/joca/internal/ui/settings"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
 	uitelemetry "github.com/thiagomarinho/joca/internal/ui/telemetry"
@@ -403,6 +404,49 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusMsg = fmt.Sprintf("Unable to search logs: pipeline %q not found", msg.Item.Entry.Name)
 		return m, m.clearStatusAfter(3 * time.Second)
+
+	case detail.OpenSavedLogSearchesMsg:
+		m.stack = append(m.stack, savedsearches.New(msg.Item.Entry.Name, m.appCfg.SavedLogSearches))
+		return m, nil
+
+	case savedsearches.RunMsg:
+		for i, entry := range m.appCfg.Pipelines {
+			if entry.Name == msg.Pipeline && i < len(m.providers) {
+				searchModel := logsearch.NewWithSaved(entry.Name, m.appCfg.LogEditor, m.providers[i].RecentRuns, msg.Search)
+				updated, cmd := searchModel.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				m.stack[len(m.stack)-1] = updated
+				return m, cmd
+			}
+		}
+		m.statusMsg = fmt.Sprintf("Unable to run saved search: pipeline %q not found", msg.Pipeline)
+		return m, m.clearStatusAfter(3 * time.Second)
+
+	case savedsearches.DeleteMsg:
+		searches := m.appCfg.SavedLogSearches[:0]
+		for _, search := range m.appCfg.SavedLogSearches {
+			if search.Name != msg.Name || search.Pipeline != msg.Pipeline {
+				searches = append(searches, search)
+			}
+		}
+		m.appCfg.SavedLogSearches = searches
+		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
+
+	case logsearch.SaveMsg:
+		replaced := false
+		for i, search := range m.appCfg.SavedLogSearches {
+			if search.Name == msg.Search.Name && search.Pipeline == msg.Search.Pipeline {
+				m.appCfg.SavedLogSearches[i] = msg.Search
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			m.appCfg.SavedLogSearches = append(m.appCfg.SavedLogSearches, msg.Search)
+		}
+		if searchModel, ok := m.stack[len(m.stack)-1].(logsearch.Model); ok {
+			m.stack[len(m.stack)-1] = searchModel.Saved(msg.Search.Name)
+		}
+		return m, saveConfigCmd(m.resolvedCfg.ConfigFile, m.appCfg)
 
 	case logsearch.BackMsg:
 		if len(m.stack) > 1 {

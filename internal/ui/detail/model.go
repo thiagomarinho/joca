@@ -40,6 +40,10 @@ type pagerClosedMsg struct {
 // this pipeline.
 type OpenLogSearchMsg struct{ Item list.PipelineItem }
 
+// OpenSavedLogSearchesMsg asks the root model to show reusable searches for
+// this AWS pipeline.
+type OpenSavedLogSearchesMsg struct{ Item list.PipelineItem }
+
 // Model shows the detail view for a selected pipeline.
 type Model struct {
 	item       list.PipelineItem
@@ -142,6 +146,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			if m.item.Entry.Provider == config.ProviderAWS && !m.loading {
 				return m, func() tea.Msg { return OpenLogSearchMsg{Item: m.item} }
+			}
+		case "S":
+			if m.item.Entry.Provider == config.ProviderAWS && !m.loading {
+				return m, func() tea.Msg { return OpenSavedLogSearchesMsg{Item: m.item} }
 			}
 		case "up", "k":
 			if m.logs != "" {
@@ -319,7 +327,7 @@ func (m Model) View() string {
 	sb.WriteString("\n  ")
 	footer := "↑↓: select run  o: open in browser"
 	if item.Entry.Provider == config.ProviderAWS {
-		footer += "  /: search CodeBuild logs"
+		footer += "  /: search CodeBuild logs  S: saved searches"
 	}
 	footer += "  esc: back"
 	sb.WriteString(styles.Footer.Render(footer))

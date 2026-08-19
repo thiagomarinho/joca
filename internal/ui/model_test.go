@@ -12,9 +12,51 @@ import (
 
 	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/credstatus"
+	"github.com/thiagomarinho/joca/internal/ui/detail"
 	"github.com/thiagomarinho/joca/internal/ui/list"
+	"github.com/thiagomarinho/joca/internal/ui/logsearch"
+	"github.com/thiagomarinho/joca/internal/ui/savedsearches"
 	"github.com/thiagomarinho/joca/internal/ui/settings"
 )
+
+func TestSavedLogSearchIsAddedOrReplacedByNameAndScope(t *testing.T) {
+	appCfg := &config.AppConfig{SavedLogSearches: []config.SavedLogSearch{{
+		Name: "errors", Pipeline: "deploy", Expression: "old", Executions: 10,
+	}}}
+	m := New(appCfg, config.Config{ConfigFile: filepath.Join(t.TempDir(), "config.yaml")})
+
+	updated := config.SavedLogSearch{Name: "errors", Pipeline: "deploy", Expression: "new", Executions: 20}
+	_, cmd := m.Update(logsearch.SaveMsg{Search: updated})
+	if cmd == nil {
+		t.Fatal("expected saved-search persistence command")
+	}
+	if len(appCfg.SavedLogSearches) != 1 || appCfg.SavedLogSearches[0].Expression != "new" {
+		t.Fatalf("saved searches = %#v", appCfg.SavedLogSearches)
+	}
+
+	global := config.SavedLogSearch{Name: "errors", Expression: "global", Executions: 5}
+	m.Update(logsearch.SaveMsg{Search: global})
+	if len(appCfg.SavedLogSearches) != 2 {
+		t.Fatalf("global search should use a separate scope: %#v", appCfg.SavedLogSearches)
+	}
+}
+
+func TestSavedLogSearchRunsForCurrentPipeline(t *testing.T) {
+	search := config.SavedLogSearch{Name: "errors", Expression: "ERROR", Executions: 5}
+	appCfg := &config.AppConfig{Pipelines: []config.PipelineEntry{{
+		Name: "deploy", Provider: config.ProviderAWS, PipelineName: "deploy", AWSRegion: "us-east-1",
+	}}}
+	m := New(appCfg, config.Config{})
+	m.Update(detail.OpenSavedLogSearchesMsg{Item: list.PipelineItem{Entry: appCfg.Pipelines[0]}})
+
+	_, cmd := m.Update(savedsearches.RunMsg{Pipeline: "deploy", Search: search})
+	if cmd == nil {
+		t.Fatal("expected saved search to start immediately")
+	}
+	if _, ok := m.stack[len(m.stack)-1].(logsearch.Model); !ok {
+		t.Fatalf("active model = %T, want logsearch.Model", m.stack[len(m.stack)-1])
+	}
+}
 
 func TestTogglePauseWhilePausedPipelinesHiddenClampsCursor(t *testing.T) {
 	appCfg := &config.AppConfig{

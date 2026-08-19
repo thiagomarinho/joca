@@ -55,6 +55,10 @@ func TestSaveAndLoad_roundtrip(t *testing.T) {
 		DefaultAWSProfile: "production",
 		DefaultAWSRegion:  "ca-central-1",
 		LogEditor:         "code-insiders --wait",
+		SavedLogSearches: []config.SavedLogSearch{{
+			Name: "deployment errors", Pipeline: "infra", Expression: "ERROR|FATAL",
+			Executions: 20, ContextLines: 2, Regex: true, CaseInsensitive: true,
+		}},
 		Pipelines: []config.PipelineEntry{
 			{Name: "my-api", Provider: config.ProviderGitHub, Owner: "acme", Repo: "my-api"},
 			{Name: "infra", Provider: config.ProviderAWS, PipelineName: "infra-deploy", AWSRegion: "us-east-1"},
@@ -78,6 +82,9 @@ func TestSaveAndLoad_roundtrip(t *testing.T) {
 	}
 	if loaded.LogEditor != "code-insiders --wait" {
 		t.Errorf("log_editor: got %q, want code-insiders --wait", loaded.LogEditor)
+	}
+	if len(loaded.SavedLogSearches) != 1 || loaded.SavedLogSearches[0].Expression != "ERROR|FATAL" || !loaded.SavedLogSearches[0].Regex {
+		t.Errorf("saved_log_searches did not round trip: %#v", loaded.SavedLogSearches)
 	}
 	if len(loaded.Pipelines) != 2 {
 		t.Fatalf("expected 2 pipelines, got %d", len(loaded.Pipelines))

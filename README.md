@@ -66,8 +66,8 @@ pipelines:
 
 The configuration screen (`s`) edits the refresh interval, AWS defaults, and
 log editor. Pipeline and automation changes made in the TUI are persisted to
-the same file. Refresh intervals shorter than 10 seconds are clamped to 10
-seconds.
+the same file, along with saved log searches. Refresh intervals shorter than
+10 seconds are clamped to 10 seconds.
 
 ## CLI
 
@@ -144,6 +144,7 @@ rejected; set `automation_allow_chains: false` to reject dependency cycles too.
 | `l` | Load selected logs; CodeBuild logs are downloaded and opened in a pager |
 | `e` | Download and open the selected CodeBuild logs in an editor |
 | `/` | Search CodeBuild logs across recent AWS executions |
+| `S` | Open saved log searches for the current AWS pipeline |
 | `Esc` / `q` | Return to the previous screen |
 
 Log-search results are grouped by pipeline execution, with every matching
@@ -156,6 +157,12 @@ keep results completed so far. Results include per-log match counts and
 line-numbered context for the selected log. Closing a pager returns to the same
 results screen. GUI editor launchers return immediately, allowing multiple
 matching logs to be opened.
+
+After a search completes, press `S` to save its expression, mode, execution
+depth, and context size. A saved search can apply only to the current pipeline
+or globally to every AWS pipeline. From pipeline details, press `S` to run or
+delete applicable saved searches. Saving the same name and scope again updates
+the existing entry.
 
 ### Automation and telemetry screens
 
@@ -223,6 +230,7 @@ joca shows that download URL rather than extracting and displaying the archive.
 |---------|-------|
 | Pipeline search and long-list navigation | Fuzzy filtering, paging, first/last navigation, and hide/focus controls |
 | AWS CodeBuild logs | Discover logs by execution and action, open them in a pager or configurable editor, and search across recent executions |
+| Saved log searches | Persist pipeline-specific or global search configurations and run them from pipeline details |
 | AWS SSO recovery | Detect expired SSO sessions and launch login for the affected profile without leaving joca |
 | Pipeline management | Add, copy, reorder, pause, focus, and delete pipelines from the TUI |
 | Application configuration | Edit refresh timing, AWS defaults, and the log editor from within the app |

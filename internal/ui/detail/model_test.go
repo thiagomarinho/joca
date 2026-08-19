@@ -31,6 +31,22 @@ func TestCodeBuildLogSearchOpensForAWSPipeline(t *testing.T) {
 	}
 }
 
+func TestSavedLogSearchesOpenForAWSPipeline(t *testing.T) {
+	item := list.PipelineItem{Entry: config.PipelineEntry{Name: "pipeline", Provider: config.ProviderAWS}}
+	m := New(item)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+	if cmd == nil {
+		t.Fatal("expected saved-search command")
+	}
+	if _, ok := cmd().(OpenSavedLogSearchesMsg); !ok {
+		t.Fatalf("message = %T, want OpenSavedLogSearchesMsg", cmd())
+	}
+	if !strings.Contains(m.View(), "S: saved searches") {
+		t.Fatal("expected saved-search shortcut in detail footer")
+	}
+}
+
 func TestLoadLogsShowsCodeBuildActionPicker(t *testing.T) {
 	run := provider.Run{
 		ID: "execution-1",

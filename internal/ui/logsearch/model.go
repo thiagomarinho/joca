@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/thiagomarinho/joca/internal/config"
 	"github.com/thiagomarinho/joca/internal/provider"
 	"github.com/thiagomarinho/joca/internal/ui/logopen"
 	"github.com/thiagomarinho/joca/internal/ui/styles"
@@ -39,6 +40,9 @@ const (
 
 // BackMsg asks the root model to return to the pipeline detail screen.
 type BackMsg struct{}
+
+// SaveMsg asks the root model to persist a reusable log search.
+type SaveMsg struct{ Search config.SavedLogSearch }
 
 type runsLoadedMsg struct {
 	generation uint64
@@ -113,6 +117,9 @@ type Model struct {
 	errors       []string
 	cursor       int
 	openStatus   string
+	saving       bool
+	saveName     string
+	saveGlobal   bool
 }
 
 // New creates a log search with a default depth of ten executions.
@@ -120,11 +127,43 @@ func New(pipeline, logEditor string, loadRuns recentRunsFunc) Model {
 	return Model{pipeline: pipeline, logEditor: logEditor, loadRuns: loadRuns, depth: "10", context: "2"}
 }
 
+// NewWithSaved creates a search form prefilled from a persisted search.
+func NewWithSaved(pipeline, logEditor string, loadRuns recentRunsFunc, saved config.SavedLogSearch) Model {
+	m := New(pipeline, logEditor, loadRuns)
+	m.query = saved.Expression
+	if saved.Executions >= 1 && saved.Executions <= 100 {
+		m.depth = strconv.Itoa(saved.Executions)
+	}
+	if saved.ContextLines >= 0 && saved.ContextLines <= maxContextLines {
+		m.context = strconv.Itoa(saved.ContextLines)
+	}
+	switch {
+	case saved.Regex && saved.CaseInsensitive:
+		m.matchMode = 3
+	case saved.Regex:
+		m.matchMode = 2
+	case saved.CaseInsensitive:
+		m.matchMode = 1
+	}
+	return m
+}
+
+// Saved closes the save form and confirms persistence in the results view.
+func (m Model) Saved(name string) Model {
+	m.saving = false
+	m.saveName = ""
+	m.openStatus = fmt.Sprintf("Saved search %q", name)
+	return m
+}
+
 func (m Model) Init() tea.Cmd { return nil }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.saving {
+			return m.updateSaveForm(msg)
+		}
 		if (m.phase == phaseLoading || m.phase == phaseSearching) && msg.String() == "esc" {
 			if m.searchCancel != nil {
 				m.searchCancel()
@@ -155,6 +194,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.openStatus = "Preparing selected log…"
 					return m, writeSourceLogCmd(m.pipeline, run, source, msg.String() == "e")
 				}
+			case "S":
+				m.saving = true
+				m.saveName = ""
+				m.saveGlobal = false
 			}
 		}
 
@@ -236,6 +279,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openStatus = fmt.Sprintf("Log viewer failed: %v", msg.err)
 		} else {
 			m.openStatus = "Returned from logs"
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateSaveForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.saving = false
+		m.saveName = ""
+		m.err = ""
+	case "tab", "left", "right":
+		m.saveGlobal = !m.saveGlobal
+	case "backspace", "ctrl+h":
+		if m.saveName != "" {
+			runes := []rune(m.saveName)
+			m.saveName = string(runes[:len(runes)-1])
+		}
+	case "enter":
+		name := strings.TrimSpace(m.saveName)
+		if name == "" {
+			m.err = "Enter a name for the saved search"
+			return m, nil
+		}
+		executions, _ := strconv.Atoi(m.depth)
+		search := config.SavedLogSearch{
+			Name:            name,
+			Pipeline:        m.pipeline,
+			Expression:      m.options.query,
+			Executions:      executions,
+			ContextLines:    m.options.contextLines,
+			Regex:           m.options.regex,
+			CaseInsensitive: m.options.caseInsensitive,
+		}
+		if m.saveGlobal {
+			search.Pipeline = ""
+		}
+		return m, func() tea.Msg { return SaveMsg{Search: search} }
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.saveName += string(msg.Runes)
+			m.err = ""
 		}
 	}
 	return m, nil
@@ -353,6 +438,19 @@ func (m Model) View() string {
 	sb.WriteString("\n  ")
 	sb.WriteString(styles.DetailTitle.Render("Search CodeBuild logs — " + m.pipeline))
 	sb.WriteString("\n\n")
+	if m.saving {
+		scope := "pipeline: " + m.pipeline
+		if m.saveGlobal {
+			scope = "all AWS pipelines"
+		}
+		fmt.Fprintf(&sb, "  Save search as: %s_\n", m.saveName)
+		fmt.Fprintf(&sb, "  Scope: %s\n", scope)
+		if m.err != "" {
+			fmt.Fprintf(&sb, "\n  %s\n", styles.StatusFailed.Render(m.err))
+		}
+		sb.WriteString("\n  " + styles.Footer.Render("type: name  tab/←→: scope  enter: save  esc: cancel"))
+		return sb.String()
+	}
 
 	switch m.phase {
 	case phaseInput:
@@ -427,7 +525,7 @@ func (m Model) View() string {
 		if m.openStatus != "" {
 			sb.WriteString("\n  " + styles.Footer.Render(m.openStatus) + "\n")
 		}
-		sb.WriteString("\n  " + styles.Footer.Render("↑↓: select  l: open logs in pager  e: open logs in editor  esc: pipeline detail"))
+		sb.WriteString("\n  " + styles.Footer.Render("↑↓: select  l: pager  e: editor  S: save search  esc: pipeline detail"))
 	}
 	return sb.String()
 }
