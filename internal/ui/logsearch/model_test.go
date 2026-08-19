@@ -84,13 +84,9 @@ func TestClosingExecutionLogsReturnsToResults(t *testing.T) {
 }
 
 func TestOpenedLogsIdentifyCodeBuildProject(t *testing.T) {
-	match := searchMatch{
-		run: provider.Run{ID: "execution-1"},
-		sources: []matchedSource{{
-			name: "Build / compile", project: "payments-build", content: "needle",
-		}},
-	}
-	msg := writeMatchLogsCmd("pipeline", match, false)().(logsWrittenMsg)
+	run := provider.Run{ID: "execution-1"}
+	source := matchedSource{name: "Build / compile", project: "payments-build", content: "needle"}
+	msg := writeSourceLogCmd("pipeline", run, source, false)().(logsWrittenMsg)
 	if msg.err != nil {
 		t.Fatalf("writeMatchLogsCmd() error = %v", msg.err)
 	}
@@ -100,6 +96,42 @@ func TestOpenedLogsIdentifyCodeBuildProject(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "CodeBuild project: payments-build") {
 		t.Fatalf("opened logs do not identify project:\n%s", content)
+	}
+}
+
+func TestSelectsAndOpensIndividualLogWithinExecution(t *testing.T) {
+	m := Model{
+		pipeline: "pipeline",
+		phase:    phaseResults,
+		matches: []searchMatch{{
+			run: provider.Run{ID: "execution-1"},
+			sources: []matchedSource{
+				{name: "Build / first", project: "first-project", content: "first needle"},
+				{name: "Build / second", project: "second-project", content: "second needle"},
+			},
+		}},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want second matching log", m.cursor)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected selected log write command")
+	}
+	msg := cmd().(logsWrittenMsg)
+	content, err := os.ReadFile(msg.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "second-project") || strings.Contains(string(content), "first needle") {
+		t.Fatalf("opened wrong log:\n%s", content)
+	}
+	if view := m.View(); !strings.Contains(view, "second-project") {
+		t.Fatalf("results missing selected project:\n%s", view)
 	}
 }
 

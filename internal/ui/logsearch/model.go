@@ -101,13 +101,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor--
 				}
 			case "down", "j":
-				if m.cursor < len(m.matches)-1 {
+				if m.cursor < m.matchingLogCount()-1 {
 					m.cursor++
 				}
 			case "enter", "l", "e":
-				if len(m.matches) > 0 {
-					m.openStatus = "Preparing matching logs…"
-					return m, writeMatchLogsCmd(m.pipeline, m.matches[m.cursor], msg.String() == "e")
+				if run, source, ok := m.selectedLog(); ok {
+					m.openStatus = "Preparing selected log…"
+					return m, writeSourceLogCmd(m.pipeline, run, source, msg.String() == "e")
 				}
 			}
 		}
@@ -246,13 +246,14 @@ func (m Model) View() string {
 		fmt.Fprintf(&sb, "  Loading %s executions…", m.depth)
 	case phaseSearching:
 		fmt.Fprintf(&sb, "  Searching execution %d/%d…\n", m.searched+1, len(m.runs))
-		fmt.Fprintf(&sb, "  Matches so far: %d", len(m.matches))
+		fmt.Fprintf(&sb, "  Matching logs so far: %d", m.matchingLogCount())
 	case phaseResults:
-		fmt.Fprintf(&sb, "  Expression: %q  ·  searched: %d  ·  matches: %d\n\n", m.query, m.searched, len(m.matches))
+		fmt.Fprintf(&sb, "  Expression: %q  ·  searched: %d  ·  matching logs: %d\n\n", m.query, m.searched, m.matchingLogCount())
 		if len(m.matches) == 0 {
 			sb.WriteString("  No matching executions.\n")
 		}
-		for i, match := range m.matches {
+		selection := 0
+		for _, match := range m.matches {
 			details := string(match.run.Status)
 			if match.run.Branch != "" {
 				details += "  " + match.run.Branch
@@ -261,16 +262,18 @@ func (m Model) View() string {
 				details += "  " + match.run.StartedAt.Format("2006-01-02 15:04")
 			}
 			line := fmt.Sprintf("  #%s  %s  %d matching log(s)", match.run.ID, details, len(match.sources))
-			if i == m.cursor {
-				line = styles.SelectedRow.Render(line)
-			}
 			sb.WriteString(line + "\n")
 			for _, source := range match.sources {
 				project := source.project
 				if project == "" {
 					project = "unknown project"
 				}
-				fmt.Fprintf(&sb, "      %s  ·  %s\n", project, source.name)
+				sourceLine := fmt.Sprintf("      %s  ·  %s", project, source.name)
+				if selection == m.cursor {
+					sourceLine = styles.SelectedRow.Render(sourceLine)
+				}
+				sb.WriteString(sourceLine + "\n")
+				selection++
 			}
 		}
 		if m.err != "" {
@@ -319,21 +322,40 @@ func searchRunCmd(run provider.Run, query string) tea.Cmd {
 	}
 }
 
-func writeMatchLogsCmd(pipeline string, match searchMatch, editor bool) tea.Cmd {
+func (m Model) matchingLogCount() int {
+	total := 0
+	for _, match := range m.matches {
+		total += len(match.sources)
+	}
+	return total
+}
+
+func (m Model) selectedLog() (provider.Run, matchedSource, bool) {
+	selection := 0
+	for _, match := range m.matches {
+		for _, source := range match.sources {
+			if selection == m.cursor {
+				return match.run, source, true
+			}
+			selection++
+		}
+	}
+	return provider.Run{}, matchedSource{}, false
+}
+
+func writeSourceLogCmd(pipeline string, run provider.Run, source matchedSource, editor bool) tea.Cmd {
 	return func() tea.Msg {
 		dir, err := os.MkdirTemp("", "joca-log-search-*")
 		if err != nil {
 			return logsWrittenMsg{err: fmt.Errorf("creating temporary directory: %w", err)}
 		}
 		var sb strings.Builder
-		for _, source := range match.sources {
-			project := source.project
-			if project == "" {
-				project = "unknown project"
-			}
-			fmt.Fprintf(&sb, "===== CodeBuild project: %s · %s =====\n%s\n", project, source.name, source.content)
+		project := source.project
+		if project == "" {
+			project = "unknown project"
 		}
-		name := safeFilename(pipeline + "-" + match.run.ID + ".log")
+		fmt.Fprintf(&sb, "===== CodeBuild project: %s · %s =====\n%s\n", project, source.name, source.content)
+		name := safeFilename(strings.Join([]string{pipeline, run.ID, project, source.name}, "-") + ".log")
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
 			return logsWrittenMsg{err: fmt.Errorf("writing logs: %w", err)}
