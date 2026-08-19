@@ -2,6 +2,8 @@ package logsearch
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,100 @@ import (
 
 	"github.com/thiagomarinho/joca/internal/provider"
 )
+
+func TestFindMatchesSupportsCaseInsensitiveContext(t *testing.T) {
+	content := strings.Join([]string{
+		"before first",
+		"ERROR one",
+		"after first",
+		"unrelated",
+		"error two",
+		"after second",
+	}, "\n")
+
+	result := findMatches(content, searchOptions{query: "error", caseInsensitive: true, contextLines: 1})
+	if result.count != 2 {
+		t.Fatalf("count = %d, want 2", result.count)
+	}
+	joined := strings.Join(result.snippets, "\n")
+	for _, want := range []string{"1  before first", "2  ERROR one", "5  error two", "6  after second"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("context missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestFindMatchesSupportsRegularExpressions(t *testing.T) {
+	result := findMatches("status=500\nstatus=404\nstatus=503", searchOptions{
+		query: "status=5[0-9]{2}", regex: true,
+	})
+	if result.count != 2 {
+		t.Fatalf("count = %d, want 2", result.count)
+	}
+}
+
+func TestSearchInputAcceptsSpacesAndRejectsInvalidRegex(t *testing.T) {
+	m := New("pipeline", "", func(context.Context, int) ([]provider.Run, error) { return nil, nil })
+	m.query = "fatal"
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("error")})
+	m = updated.(Model)
+	if m.query != "fatal error" {
+		t.Fatalf("query = %q, want expression with space", m.query)
+	}
+
+	m.query = "["
+	m.matchMode = 2
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil || !strings.Contains(m.err, "Invalid regular expression") {
+		t.Fatalf("invalid regex was accepted: cmd=%v err=%q", cmd != nil, m.err)
+	}
+}
+
+func TestSearchUsesBoundedConcurrencyAndContinuesAfterResult(t *testing.T) {
+	runs := make([]provider.Run, 6)
+	for i := range runs {
+		runs[i].ID = fmt.Sprintf("execution-%d", i)
+	}
+	m := Model{phase: phaseLoading, generation: 1, options: searchOptions{query: "needle"}}
+
+	updated, cmd := m.Update(runsLoadedMsg{generation: 1, runs: runs})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected concurrent search commands")
+	}
+	if m.active != maxConcurrentSearches || m.nextRun != maxConcurrentSearches {
+		t.Fatalf("active=%d next=%d, want %d", m.active, m.nextRun, maxConcurrentSearches)
+	}
+
+	updated, cmd = m.Update(runSearchedMsg{generation: 1, match: searchMatch{run: runs[0]}})
+	m = updated.(Model)
+	if cmd == nil || m.active != maxConcurrentSearches || m.nextRun != maxConcurrentSearches+1 {
+		t.Fatalf("replacement search not started: active=%d next=%d cmd=%v", m.active, m.nextRun, cmd != nil)
+	}
+}
+
+func TestEscapeCancelsSearchAndIgnoresLateResults(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := Model{phase: phaseSearching, generation: 4, searchCancel: cancel, active: 2}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.phase != phaseResults || m.generation != 5 || !m.cancelled {
+		t.Fatalf("search not cancelled: %#v", m)
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("context error = %v, want canceled", ctx.Err())
+	}
+
+	updated, _ = m.Update(runSearchedMsg{generation: 4, match: searchMatch{sources: []matchedSource{{content: "late"}}}})
+	m = updated.(Model)
+	if len(m.matches) != 0 {
+		t.Fatal("late result from cancelled generation was applied")
+	}
+}
 
 func TestSearchReportsProgressAndCollectsMatchingExecutions(t *testing.T) {
 	runs := []provider.Run{
@@ -29,13 +125,13 @@ func TestSearchReportsProgressAndCollectsMatchingExecutions(t *testing.T) {
 
 	updated, cmd = m.Update(cmd())
 	m = updated.(Model)
-	if cmd == nil || !strings.Contains(m.View(), "Searching execution 1/2") {
-		t.Fatal("expected per-execution search progress")
+	if cmd == nil || !strings.Contains(m.View(), "0/2 complete") {
+		t.Fatal("expected concurrent execution search progress")
 	}
 
-	updated, cmd = m.Update(cmd())
+	updated, _ = m.Update(searchRunCmd(context.Background(), m.generation, 0, runs[0], m.options)())
 	m = updated.(Model)
-	updated, cmd = m.Update(cmd())
+	updated, cmd = m.Update(searchRunCmd(context.Background(), m.generation, 1, runs[1], m.options)())
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatal("expected search to be complete")

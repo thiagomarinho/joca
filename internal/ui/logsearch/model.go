@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,17 +29,27 @@ const (
 	phaseResults
 )
 
+const (
+	maxConcurrentSearches = 4
+	maxContextLines       = 20
+	maxSnippetGroups      = 3
+	maxSnippetLines       = 25
+	inputFieldCount       = 4
+)
+
 // BackMsg asks the root model to return to the pipeline detail screen.
 type BackMsg struct{}
 
 type runsLoadedMsg struct {
-	runs []provider.Run
-	err  error
+	generation uint64
+	runs       []provider.Run
+	err        error
 }
 
 type runSearchedMsg struct {
-	match searchMatch
-	err   error
+	generation uint64
+	match      searchMatch
+	err        error
 }
 
 type logsWrittenMsg struct {
@@ -53,35 +65,59 @@ type recentRunsFunc func(context.Context, int) ([]provider.Run, error)
 type searchMatch struct {
 	run     provider.Run
 	sources []matchedSource
+	order   int
 }
 
 type matchedSource struct {
-	name    string
-	project string
-	content string
+	name       string
+	project    string
+	content    string
+	matchCount int
+	snippets   []string
+}
+
+type searchOptions struct {
+	query           string
+	regex           bool
+	caseInsensitive bool
+	contextLines    int
+}
+
+type matchResult struct {
+	count    int
+	snippets []string
 }
 
 // Model searches CodeBuild logs for recent executions of one pipeline.
 type Model struct {
-	pipeline   string
-	loadRuns   recentRunsFunc
-	logEditor  string
-	phase      phase
-	field      int
-	query      string
-	depth      string
-	err        string
-	runs       []provider.Run
-	searched   int
-	matches    []searchMatch
-	errors     []string
-	cursor     int
-	openStatus string
+	pipeline     string
+	loadRuns     recentRunsFunc
+	logEditor    string
+	phase        phase
+	field        int
+	query        string
+	depth        string
+	context      string
+	matchMode    int
+	options      searchOptions
+	err          string
+	runs         []provider.Run
+	searched     int
+	nextRun      int
+	active       int
+	generation   uint64
+	searchCtx    context.Context
+	searchCancel context.CancelFunc
+	cancelled    bool
+	matches      []searchMatch
+	errors       []string
+	cursor       int
+	openStatus   string
 }
 
 // New creates a log search with a default depth of ten executions.
 func New(pipeline, logEditor string, loadRuns recentRunsFunc) Model {
-	return Model{pipeline: pipeline, logEditor: logEditor, loadRuns: loadRuns, depth: "10"}
+	return Model{pipeline: pipeline, logEditor: logEditor, loadRuns: loadRuns, depth: "10", context: "2"}
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -89,6 +125,16 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if (m.phase == phaseLoading || m.phase == phaseSearching) && msg.String() == "esc" {
+			if m.searchCancel != nil {
+				m.searchCancel()
+			}
+			m.generation++
+			m.active = 0
+			m.cancelled = true
+			m.phase = phaseResults
+			return m, nil
+		}
 		if m.phase == phaseInput {
 			return m.updateInput(msg)
 		}
@@ -113,34 +159,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case runsLoadedMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.phase = phaseInput
+			m.searchCancel = nil
 			m.err = fmt.Sprintf("loading executions: %v", msg.err)
 			return m, nil
 		}
 		m.runs = msg.runs
 		m.searched = 0
+		m.nextRun = 0
+		m.active = 0
 		m.matches = nil
 		m.errors = nil
+		m.cancelled = false
 		if len(m.runs) == 0 {
 			m.phase = phaseResults
+			m.searchCancel = nil
 			return m, nil
 		}
 		m.phase = phaseSearching
-		return m, searchRunCmd(m.runs[0], m.query)
+		return m, m.startSearches()
 
 	case runSearchedMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		if m.active > 0 {
+			m.active--
+		}
 		if msg.err != nil {
 			m.errors = append(m.errors, msg.err.Error())
 		}
 		if len(msg.match.sources) > 0 {
 			m.matches = append(m.matches, msg.match)
+			sort.SliceStable(m.matches, func(i, j int) bool {
+				return m.matches[i].order < m.matches[j].order
+			})
 		}
 		m.searched++
-		if m.searched < len(m.runs) {
-			return m, searchRunCmd(m.runs[m.searched], m.query)
+		if m.nextRun < len(m.runs) {
+			return m, m.startSearches()
 		}
-		m.phase = phaseResults
+		if m.active == 0 {
+			m.phase = phaseResults
+			m.searchCancel = nil
+		}
 
 	case logsWrittenMsg:
 		if msg.err != nil {
@@ -179,14 +245,40 @@ func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		return m, func() tea.Msg { return BackMsg{} }
-	case "tab", "up", "down":
-		m.field = 1 - m.field
+	case "tab", "down":
+		m.field = (m.field + 1) % inputFieldCount
+	case "shift+tab", "up":
+		m.field = (m.field - 1 + inputFieldCount) % inputFieldCount
+	case "left":
+		if m.field == 3 {
+			m.matchMode = (m.matchMode - 1 + 4) % 4
+		}
+	case "right":
+		if m.field == 3 {
+			m.matchMode = (m.matchMode + 1) % 4
+		}
+	case " ":
+		switch m.field {
+		case 3:
+			m.matchMode = (m.matchMode + 1) % 4
+		case 0:
+			m.query += " "
+		}
 	case "backspace", "ctrl+h":
-		if m.field == 0 && m.query != "" {
-			r := []rune(m.query)
-			m.query = string(r[:len(r)-1])
-		} else if m.field == 1 && m.depth != "" {
-			m.depth = m.depth[:len(m.depth)-1]
+		switch m.field {
+		case 0:
+			if m.query != "" {
+				r := []rune(m.query)
+				m.query = string(r[:len(r)-1])
+			}
+		case 1:
+			if m.depth != "" {
+				m.depth = m.depth[:len(m.depth)-1]
+			}
+		case 2:
+			if m.context != "" {
+				m.context = m.context[:len(m.context)-1]
+			}
 		}
 	case "enter":
 		depth, err := strconv.Atoi(m.depth)
@@ -198,23 +290,56 @@ func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = "Execution count must be between 1 and 100"
 			return m, nil
 		}
+		contextLines, contextErr := strconv.Atoi(m.context)
+		if contextErr != nil || contextLines < 0 || contextLines > maxContextLines {
+			m.err = fmt.Sprintf("Context lines must be between 0 and %d", maxContextLines)
+			return m, nil
+		}
+		options := searchOptions{
+			query:           m.query,
+			regex:           m.matchMode >= 2,
+			caseInsensitive: m.matchMode%2 == 1,
+			contextLines:    contextLines,
+		}
+		if options.regex {
+			pattern := options.query
+			if options.caseInsensitive {
+				pattern = "(?i)" + pattern
+			}
+			if _, err := regexp.Compile(pattern); err != nil {
+				m.err = fmt.Sprintf("Invalid regular expression: %v", err)
+				return m, nil
+			}
+		}
 		m.err = ""
+		m.options = options
 		m.phase = phaseLoading
+		m.cancelled = false
+		m.generation++
+		generation := m.generation
+		ctx, cancel := context.WithCancel(context.Background())
+		m.searchCtx = ctx
+		m.searchCancel = cancel
 		load := m.loadRuns
 		return m, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			runs, err := load(ctx, depth)
-			return runsLoadedMsg{runs: runs, err: err}
+			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
+			defer loadCancel()
+			runs, err := load(loadCtx, depth)
+			return runsLoadedMsg{generation: generation, runs: runs, err: err}
 		}
 	default:
 		if msg.Type == tea.KeyRunes {
-			if m.field == 0 {
+			switch m.field {
+			case 0:
 				m.query += string(msg.Runes)
-			} else {
+			case 1, 2:
 				for _, r := range msg.Runes {
 					if r >= '0' && r <= '9' {
-						m.depth += string(r)
+						if m.field == 1 {
+							m.depth += string(r)
+						} else {
+							m.context += string(r)
+						}
 					}
 				}
 			}
@@ -231,26 +356,35 @@ func (m Model) View() string {
 
 	switch m.phase {
 	case phaseInput:
-		query, depth := "  Expression: "+m.query, "  Executions: "+m.depth
-		if m.field == 0 {
-			query = styles.SelectedRow.Render(query)
-		} else {
-			depth = styles.SelectedRow.Render(depth)
+		fields := []string{
+			"  Expression: " + m.query,
+			"  Executions: " + m.depth,
+			"  Context lines: " + m.context,
+			"  Match mode: " + m.matchModeLabel(),
 		}
-		sb.WriteString(query + "\n" + depth + "\n")
+		for i, value := range fields {
+			if i == m.field {
+				value = styles.SelectedRow.Render(value)
+			}
+			sb.WriteString(value + "\n")
+		}
 		if m.err != "" {
 			sb.WriteString("\n  " + styles.StatusFailed.Render(m.err) + "\n")
 		}
-		sb.WriteString("\n  " + styles.Footer.Render("tab: change field  enter: search  esc: back"))
+		sb.WriteString("\n  " + styles.Footer.Render("tab/↑↓: field  ←→/space: match mode  enter: search  esc: back"))
 	case phaseLoading:
-		fmt.Fprintf(&sb, "  Loading %s executions…", m.depth)
+		fmt.Fprintf(&sb, "  Loading %s executions…\n\n  esc: cancel", m.depth)
 	case phaseSearching:
-		fmt.Fprintf(&sb, "  Searching execution %d/%d…\n", m.searched+1, len(m.runs))
-		fmt.Fprintf(&sb, "  Matching logs so far: %d", m.matchingLogCount())
+		fmt.Fprintf(&sb, "  Searching executions: %d/%d complete  ·  %d active\n", m.searched, len(m.runs), m.active)
+		fmt.Fprintf(&sb, "  Matching logs so far: %d\n\n  esc: cancel", m.matchingLogCount())
 	case phaseResults:
-		fmt.Fprintf(&sb, "  Expression: %q  ·  searched: %d  ·  matching logs: %d\n\n", m.query, m.searched, m.matchingLogCount())
+		fmt.Fprintf(&sb, "  Expression: %q  ·  searched: %d  ·  matching logs: %d\n", m.query, m.searched, m.matchingLogCount())
+		fmt.Fprintf(&sb, "  Mode: %s  ·  context: %d line(s)\n\n", m.matchModeLabel(), m.options.contextLines)
+		if m.cancelled {
+			sb.WriteString("  Search cancelled; showing completed results.\n\n")
+		}
 		if len(m.matches) == 0 {
-			sb.WriteString("  No matching executions.\n")
+			sb.WriteString("  No matching logs.\n")
 		}
 		selection := 0
 		for _, match := range m.matches {
@@ -269,10 +403,18 @@ func (m Model) View() string {
 					project = "unknown project"
 				}
 				sourceLine := fmt.Sprintf("      %s  ·  %s", project, source.name)
-				if selection == m.cursor {
+				selected := selection == m.cursor
+				if selected {
 					sourceLine = styles.SelectedRow.Render(sourceLine)
 				}
-				sb.WriteString(sourceLine + "\n")
+				fmt.Fprintf(&sb, "%s  (%d match(es))\n", sourceLine, source.matchCount)
+				if selected {
+					for _, snippet := range source.snippets {
+						for _, line := range strings.Split(snippet, "\n") {
+							fmt.Fprintf(&sb, "        %s\n", styles.Footer.Render(line))
+						}
+					}
+				}
 				selection++
 			}
 		}
@@ -290,36 +432,142 @@ func (m Model) View() string {
 	return sb.String()
 }
 
-func searchRunCmd(run provider.Run, query string) tea.Cmd {
+func (m *Model) startSearches() tea.Cmd {
+	var cmds []tea.Cmd
+	for m.active < maxConcurrentSearches && m.nextRun < len(m.runs) {
+		order := m.nextRun
+		run := m.runs[order]
+		m.nextRun++
+		m.active++
+		cmds = append(cmds, searchRunCmd(m.searchCtx, m.generation, order, run, m.options))
+	}
+	return tea.Batch(cmds...)
+}
+
+func searchRunCmd(parent context.Context, generation uint64, order int, run provider.Run, options searchOptions) tea.Cmd {
 	return func() tea.Msg {
 		if run.LogSources == nil {
-			return runSearchedMsg{}
+			return runSearchedMsg{generation: generation, match: searchMatch{run: run, order: order}}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		defer cancel()
 		sources, err := run.LogSources(ctx)
 		if err != nil {
-			return runSearchedMsg{err: fmt.Errorf("searching execution %s: %w", run.ID, err)}
+			return runSearchedMsg{generation: generation, err: fmt.Errorf("searching execution %s: %w", run.ID, err)}
 		}
-		match := searchMatch{run: run}
+		match := searchMatch{run: run, order: order}
 		for _, source := range sources {
 			if source.Logs == nil {
 				continue
 			}
 			content, err := source.Logs(ctx)
 			if err != nil {
-				return runSearchedMsg{err: fmt.Errorf("loading %s/%s for execution %s: %w", source.Stage, source.Action, run.ID, err)}
+				return runSearchedMsg{generation: generation, err: fmt.Errorf("loading %s/%s for execution %s: %w", source.Stage, source.Action, run.ID, err)}
 			}
-			if strings.Contains(content, query) {
+			result := findMatches(content, options)
+			if result.count > 0 {
 				match.sources = append(match.sources, matchedSource{
-					name:    source.Stage + " / " + source.Action,
-					project: source.Project,
-					content: content,
+					name:       source.Stage + " / " + source.Action,
+					project:    source.Project,
+					content:    content,
+					matchCount: result.count,
+					snippets:   result.snippets,
 				})
 			}
 		}
-		return runSearchedMsg{match: match}
+		return runSearchedMsg{generation: generation, match: match}
 	}
+}
+
+func findMatches(content string, options searchOptions) matchResult {
+	lines := strings.Split(content, "\n")
+	matchingLines := make([]int, 0)
+	result := matchResult{}
+
+	var expression *regexp.Regexp
+	if options.regex {
+		pattern := options.query
+		if options.caseInsensitive {
+			pattern = "(?i)" + pattern
+		}
+		expression, _ = regexp.Compile(pattern)
+	}
+
+	for i, line := range lines {
+		count := 0
+		if expression != nil {
+			count = len(expression.FindAllStringIndex(line, -1))
+		} else {
+			haystack, needle := line, options.query
+			if options.caseInsensitive {
+				haystack = strings.ToLower(haystack)
+				needle = strings.ToLower(needle)
+			}
+			count = strings.Count(haystack, needle)
+		}
+		if count > 0 {
+			result.count += count
+			matchingLines = append(matchingLines, i)
+		}
+	}
+
+	for _, bounds := range contextRanges(matchingLines, len(lines), options.contextLines) {
+		if len(result.snippets) >= maxSnippetGroups {
+			break
+		}
+		var snippet strings.Builder
+		lastLine := bounds[1]
+		truncated := false
+		if lastLine-bounds[0]+1 > maxSnippetLines {
+			lastLine = bounds[0] + maxSnippetLines - 1
+			truncated = true
+		}
+		for line := bounds[0]; line <= lastLine; line++ {
+			if snippet.Len() > 0 {
+				snippet.WriteByte('\n')
+			}
+			fmt.Fprintf(&snippet, "%d  %s", line+1, lines[line])
+		}
+		if truncated {
+			snippet.WriteString("\n…")
+		}
+		result.snippets = append(result.snippets, snippet.String())
+	}
+	return result
+}
+
+func contextRanges(matches []int, lineCount, contextLines int) [][2]int {
+	var ranges [][2]int
+	for _, line := range matches {
+		start := line - contextLines
+		if start < 0 {
+			start = 0
+		}
+		end := line + contextLines
+		if end >= lineCount {
+			end = lineCount - 1
+		}
+		if len(ranges) > 0 && start <= ranges[len(ranges)-1][1]+1 {
+			if end > ranges[len(ranges)-1][1] {
+				ranges[len(ranges)-1][1] = end
+			}
+			continue
+		}
+		ranges = append(ranges, [2]int{start, end})
+	}
+	return ranges
+}
+
+func (m Model) matchModeLabel() string {
+	return []string{
+		"literal · case-sensitive",
+		"literal · case-insensitive",
+		"regular expression · case-sensitive",
+		"regular expression · case-insensitive",
+	}[m.matchMode%4]
 }
 
 func (m Model) matchingLogCount() int {

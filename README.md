@@ -147,11 +147,15 @@ rejected; set `automation_allow_chains: false` to reject dependency cycles too.
 | `Esc` / `q` | Return to the previous screen |
 
 Log-search results are grouped by pipeline execution, with every matching
-CodeBuild project/action shown as an individually selectable row. Searches are
-literal and case-sensitive. Choose a depth from 1–100 executions; progress and
-partial failures are reported while the search runs. Closing a pager returns
-to the same results screen. GUI editor launchers return immediately, allowing
-multiple matching logs to be opened.
+CodeBuild project/action shown as an individually selectable row. Search modes
+support literal text or regular expressions, each case-sensitive or
+case-insensitive. Choose a depth from 1–100 executions and 0–20 lines of
+surrounding context. joca searches up to four executions concurrently and
+shows completed, active, and matching-log counts. Press `Esc` to cancel and
+keep results completed so far. Results include per-log match counts and
+line-numbered context for the selected log. Closing a pager returns to the same
+results screen. GUI editor launchers return immediately, allowing multiple
+matching logs to be opened.
 
 ### Automation and telemetry screens
 
